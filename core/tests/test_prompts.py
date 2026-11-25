@@ -287,16 +287,16 @@ def test_the_documents_skill_goes_only_to_a_member_session_that_holds_the_server
     assert "## Documents" not in guest
 
 
-def test_the_sandbox_skill_goes_only_to_a_member_session_that_holds_the_server() -> None:
+def test_the_code_execution_skill_goes_only_to_a_member_session_that_holds_the_server() -> None:
     composer = PromptComposer()
     profile = derive_profile(_MEMBER, _DM)
     without = composer.compose(profile, _MEMBER, _DM, servers=["files", "documents"])
-    held = composer.compose(profile, _MEMBER, _DM, servers=["files", "sandbox"])
-    assert "## The sandbox" not in without
-    assert "## The sandbox" in held
+    held = composer.compose(profile, _MEMBER, _DM, servers=["files", "code-execution"])
+    assert "## Code execution" not in without
+    assert "## Code execution" in held
     assert "Compute; do not count in your head." in held
-    guest = composer.compose(derive_profile(_GUEST, _DM), _GUEST, _DM, servers=["sandbox"])
-    assert "## The sandbox" not in guest
+    guest = composer.compose(derive_profile(_GUEST, _DM), _GUEST, _DM, servers=["code-execution"])
+    assert "## Code execution" not in guest
 
 
 def test_the_developer_skill_goes_only_to_a_member_session_that_holds_the_server() -> None:

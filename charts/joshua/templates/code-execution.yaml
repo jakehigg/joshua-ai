@@ -1,10 +1,10 @@
-{{- if .Values.sandbox.enabled }}
-{{/* The code sandbox: the stock Jupyter scipy image, which runs Python for the
-     `sandbox` builtin of the gateway. docs/sandbox.md has the design.
+{{- if .Values.codeExecution.enabled }}
+{{/* Code execution: the stock Jupyter scipy image, which runs Python for the
+     `code-execution` builtin of the gateway. docs/code-execution.md has the design.
 
      Two switches turn it on, and both are needed. This one puts the pod in the
-     cluster. `sandbox.enabled: true` inside `config` gives the builtin its
-     tools. Set `sandbox.url` in `config` to http://joshua-sandbox:8888.
+     cluster. `code_execution.enabled: true` inside `config` gives the builtin its
+     tools. Set `code_execution.url` in `config` to http://joshua-code-execution:8888.
 
      The pod mounts no volume of the instance, holds no credential except its
      own Jupyter token, and gets no service account token. Its only writable
@@ -12,9 +12,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: joshua-sandbox
+  name: joshua-code-execution
   labels:
-    app.kubernetes.io/name: joshua-sandbox
+    app.kubernetes.io/name: joshua-code-execution
     {{- include "joshua.labels" . | nindent 4 }}
 spec:
   replicas: 1
@@ -25,11 +25,11 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: joshua-sandbox
+      app.kubernetes.io/name: joshua-code-execution
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: joshua-sandbox
+        app.kubernetes.io/name: joshua-code-execution
         {{- include "joshua.labels" . | nindent 8 }}
       {{- with .Values.podAnnotations }}
       annotations: {{- toYaml . | nindent 8 }}
@@ -48,8 +48,8 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: sandbox
-          image: {{ .Values.sandbox.image }}
+        - name: code-execution
+          image: {{ .Values.codeExecution.image }}
           imagePullPolicy: IfNotPresent
           {{/* Jupyter turns its auth off with an empty token, so the
                container refuses to start without one. */}}
@@ -57,14 +57,14 @@ spec:
             - sh
             - -c
             - 'test -n "$JUPYTER_TOKEN" || { echo "JUPYTER_TOKEN is empty" >&2; exit 1; }; exec jupyter server "$@"'
-            - sandbox
+            - code-execution
             - --ServerApp.ip=0.0.0.0
             - --ServerApp.port=8888
             - --ServerApp.root_dir=/home/jovyan
             - --ServerApp.open_browser=False
             - --ServerApp.allow_remote_access=True
             - --ServerApp.terminals_enabled=False
-            - --MappingKernelManager.cull_idle_timeout={{ .Values.sandbox.cullIdleSeconds }}
+            - --MappingKernelManager.cull_idle_timeout={{ .Values.codeExecution.cullIdleSeconds }}
             - --MappingKernelManager.cull_interval=300
             - --MappingKernelManager.cull_connected=True
           ports:
@@ -79,9 +79,9 @@ spec:
               drop:
                 - ALL
           env:
-            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.sandbox) | nindent 12 }}
+            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.codeExecution) | nindent 12 }}
           resources:
-            {{- toYaml .Values.sandbox.resources | nindent 12 }}
+            {{- toYaml .Values.codeExecution.resources | nindent 12 }}
           {{/* The probes run in the pod, so the network policy needs no rule
                for the kubelet. GET /api answers with no token. */}}
           livenessProbe:
@@ -104,7 +104,7 @@ spec:
       volumes:
         - name: home
           emptyDir:
-            sizeLimit: {{ .Values.sandbox.workSizeLimit }}
+            sizeLimit: {{ .Values.codeExecution.workSizeLimit }}
         - name: tmp
           emptyDir:
             sizeLimit: 512Mi
@@ -121,13 +121,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: joshua-sandbox
+  name: joshua-code-execution
   labels:
-    app.kubernetes.io/name: joshua-sandbox
+    app.kubernetes.io/name: joshua-code-execution
     {{- include "joshua.labels" . | nindent 4 }}
 spec:
   selector:
-    app.kubernetes.io/name: joshua-sandbox
+    app.kubernetes.io/name: joshua-code-execution
   ports:
     - name: http
       port: 8888
@@ -137,18 +137,18 @@ spec:
      list is empty, so there is no DNS and no route to the cluster or the
      internet. A reply to the gateway is part of the connection that the
      gateway opened, so the policy allows it. This policy is not optional: the
-     sandbox without it is a shell with a network. */}}
+     pod without it is a shell with a network. */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: joshua-sandbox
+  name: joshua-code-execution
   labels:
-    app.kubernetes.io/name: joshua-sandbox
+    app.kubernetes.io/name: joshua-code-execution
     {{- include "joshua.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: joshua-sandbox
+      app.kubernetes.io/name: joshua-code-execution
   policyTypes:
     - Ingress
     - Egress

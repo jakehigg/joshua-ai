@@ -125,7 +125,7 @@ def data_root() -> Path:
 def build_builtin_server(name: str, options: dict[str, Any]) -> Server:
     """Build the in-process ``Server`` for a builtin catalog entry.
 
-    ``files``, ``documents`` and ``sandbox`` exist; ``viewer`` and ``research``
+    ``files``, ``documents`` and ``code-execution`` exist; ``viewer`` and ``research``
     are reserved names.
     """
     if name == "files":
@@ -136,12 +136,12 @@ def build_builtin_server(name: str, options: dict[str, Any]) -> Server:
         from joshua_gateway.documents_mcp.server import build_documents_server
 
         return build_documents_server(data_root())
-    if name == "sandbox":
+    if name == "code-execution":
         from joshua_shared import config
 
-        from joshua_gateway.sandbox_mcp.server import build_sandbox_server
+        from joshua_gateway.code_execution_mcp.server import build_code_execution_server
 
-        return build_sandbox_server(data_root(), config.load().sandbox)
+        return build_code_execution_server(data_root(), config.load().code_execution)
     raise ValueError(f"unknown builtin server: {name}")
 
 

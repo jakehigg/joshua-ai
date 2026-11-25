@@ -11,7 +11,7 @@ COMPOSE := docker compose -f docker-compose.yml $(shell sh scripts/enhancements.
 
 # The optional containers that joshua.yaml turns on: `viewer` with
 # `viewer.enabled: true`, `assignments` with `assignments.enabled: true`,
-# `sandbox` with `sandbox.enabled: true`.
+# `code-execution` with `code_execution.enabled: true`.
 # Every target below then starts, lists, and stops them with the stack.
 export COMPOSE_PROFILES := $(shell sh scripts/profiles.sh)
 
@@ -150,11 +150,11 @@ init-env:
 		echo "JOSHUA_VIEWER_SESSION_SECRET=$$key" >> .env; \
 		echo "minted JOSHUA_VIEWER_SESSION_SECRET"; \
 	fi
-	@if ! grep -q "^SANDBOX_TOKEN=." .env; then \
+	@if ! grep -q "^CODE_EXECUTION_TOKEN=." .env; then \
 		key=$$(openssl rand -base64 33 | tr '+/' '-_' | tr -d '='); \
-		sed -i.bak '/^SANDBOX_TOKEN=/d' .env && rm -f .env.bak; \
-		echo "SANDBOX_TOKEN=$$key" >> .env; \
-		echo "minted SANDBOX_TOKEN"; \
+		sed -i.bak '/^CODE_EXECUTION_TOKEN=/d' .env && rm -f .env.bak; \
+		echo "CODE_EXECUTION_TOKEN=$$key" >> .env; \
+		echo "minted CODE_EXECUTION_TOKEN"; \
 	fi
 	@for name in CHANNELS CORE GATEWAY LAPTOP VIEWER MCP ASSIGNMENTS; do \
 		if ! grep -q "^JOSHUA_TOKEN_$$name=." .env; then \

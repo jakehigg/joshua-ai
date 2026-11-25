@@ -1,4 +1,4 @@
-# Values that render the code sandbox: its Deployment, its Service, and its
+# Values that render code execution: its Deployment, its Service, and its
 # network policy. They name no real deployment.
 config: |
   name: Test House
@@ -7,12 +7,12 @@ config: |
     - id: alex
       name: Alex
       role: member
-  sandbox:
+  code_execution:
     enabled: true
-    url: http://joshua-sandbox:8888
+    url: http://joshua-code-execution:8888
   mcp:
-    sandbox:
+    code-execution:
       kind: builtin
       allow: all
-sandbox:
+codeExecution:
   enabled: true
