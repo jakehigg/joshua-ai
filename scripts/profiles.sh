@@ -5,6 +5,7 @@
 #
 #   viewer        when `viewer.enabled: true`
 #   assignments   when `assignments.enabled: true`
+#   sandbox       when `sandbox.enabled: true`
 #
 # Usage: scripts/profiles.sh [yaml_file]
 #   yaml_file   defaults to joshua.yaml in the repo root. A test passes
@@ -33,7 +34,7 @@ awk '
             child = -1
             next
         }
-        if (section != "viewer" && section != "assignments") { next }
+        if (section != "viewer" && section != "assignments" && section != "sandbox") { next }
         if (child < 0) { child = indent }
         if (indent != child) { next }
         line = substr($0, indent + 1)
@@ -43,6 +44,7 @@ awk '
         out = ""
         if (on["viewer"]) { out = "viewer" }
         if (on["assignments"]) { out = out (out == "" ? "" : ",") "assignments" }
+        if (on["sandbox"]) { out = out (out == "" ? "" : ",") "sandbox" }
         print out
     }
 ' "$yaml_file"

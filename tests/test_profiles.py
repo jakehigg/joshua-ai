@@ -1,7 +1,8 @@
 """`scripts/profiles.sh`: the compose profiles that joshua.yaml turns on.
 
 The Makefile exports its output as COMPOSE_PROFILES, so `make up` starts the
-viewer and the assignments container when the config enables them. The
+viewer, the assignments container, and the sandbox when the config enables
+them. The
 script never touches Docker, so the tests run it against a temporary file.
 """
 
@@ -40,6 +41,16 @@ def test_the_viewer(tmp_path: Path) -> None:
 def test_both(tmp_path: Path) -> None:
     text = "assignments:\n  enabled: true\nviewer:\n  enabled: true\n"
     assert run(tmp_path, text) == "viewer,assignments\n"
+
+
+def test_the_sandbox(tmp_path: Path) -> None:
+    text = "sandbox:\n  enabled: true\nmcp:\n  sandbox:\n    enabled: true\n"
+    assert run(tmp_path, text) == "sandbox\n"
+
+
+def test_all_three(tmp_path: Path) -> None:
+    text = "sandbox:\n  enabled: true\nassignments:\n  enabled: true\nviewer:\n  enabled: true\n"
+    assert run(tmp_path, text) == "viewer,assignments,sandbox\n"
 
 
 def test_an_enabled_key_deeper_or_elsewhere_does_not_count(tmp_path: Path) -> None:

@@ -1,0 +1,18 @@
+# Values that render the code sandbox: its Deployment, its Service, and its
+# network policy. They name no real deployment.
+config: |
+  name: Test House
+  timezone: UTC
+  people:
+    - id: alex
+      name: Alex
+      role: member
+  sandbox:
+    enabled: true
+    url: http://joshua-sandbox:8888
+  mcp:
+    sandbox:
+      kind: builtin
+      allow: all
+sandbox:
+  enabled: true

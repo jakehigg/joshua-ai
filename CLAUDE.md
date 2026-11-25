@@ -299,8 +299,16 @@ Never add `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `WebSearch`, or
 `WebFetch` to the agent's tool list. `engine/agent.py` passes `tools=[]` and
 asserts it. Every capability is an MCP server: `recall`, `history`,
 `internet`, `scheduling`, `registration`, and `limits` inside `core`, and `files`,
-`documents`, and every configured upstream behind `gateway`. If a task seems to need a
+`documents`, `sandbox`, and every configured upstream behind `gateway`. If a task seems to need a
 built-in tool, the task is wrong. Open an issue.
+
+The `sandbox` builtin runs Python that the agent writes, and never in `core` or
+`gateway`: the code runs in the sandbox container, a stock Jupyter server with
+no network, no credential except its own token, and no mount of `/data`. The
+gateway copies the input files in with the rules of the person. Keep the
+container on its closed network (`sandbox` in compose, the chart's
+NetworkPolicy with no egress), and never give it a volume or a secret of the
+instance. `docs/sandbox.md` has the design and the known limitation.
 
 **One narrow exception for the agent: `ToolSearch`.** With tool search on for
 the job of the turn (`inference.<job>.tool_search`, on for `chat` and off for

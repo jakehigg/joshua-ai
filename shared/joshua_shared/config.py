@@ -52,7 +52,7 @@ _PERSON_ID_RE = PERSON_ID_RE
 MCP_NAME_PATTERN = r"^[a-z][a-z0-9-]{0,31}$"
 _MCP_NAME_RE = re.compile(MCP_NAME_PATTERN)
 # Builtin servers run in-process in the gateway. Only these names are valid.
-BUILTIN_SERVER_NAMES = ("files", "documents", "viewer", "research")
+BUILTIN_SERVER_NAMES = ("files", "documents", "sandbox", "viewer", "research")
 MCP_TRANSPORTS = ("stdio", "http", "sse")
 # Memory source adapters the indexer can wire. ``files`` is the kernel and is
 # always active; the rest are optional and land with their own tickets.
@@ -99,6 +99,10 @@ NO_OWNER_WARNING = "no person has role 'owner'"
 # so every page refuses every request and the sign-in page offers no form. It
 # is a warning and not a refusal, because every container reads this file and
 # the rest of the instance runs.
+SANDBOX_OFF_WARNING = (
+    "mcp.sandbox is set but sandbox.enabled is false, so the sandbox server has "
+    "no tools: set sandbox.enabled: true and start the sandbox container"
+)
 NO_VIEWER_ACCESS_WARNING = (
     "viewer.auth.method is 'anonymous' and viewer.anonymous is not set, so "
     "nobody can read the viewer: set viewer.anonymous: true to open it without "
@@ -1084,6 +1088,45 @@ class LimitsConfig(_Model):
         return frozenset(jobs)
 
 
+# --- sandbox -----------------------------------------------------------------
+
+
+class SandboxConfig(_Model):
+    """The code sandbox: a Jupyter server in its own container, with no network.
+
+    The ``sandbox`` builtin of the gateway runs Python there for the agent:
+    one kernel for each conversation, so a table loaded in one call is still
+    loaded in the next. ``enabled: false``, the default, gives the server no
+    tools, and the container is not started. ``url`` is the Jupyter server as
+    the gateway reaches it. The token is ``SANDBOX_TOKEN`` in the environment
+    of the gateway, and the same value is ``JUPYTER_TOKEN`` in the container.
+    ``docs/sandbox.md`` has the design and the limits.
+    """
+
+    enabled: bool = False
+    url: str = "http://sandbox:8888"
+    # One run stops after this many seconds: the kernel is interrupted, then
+    # shut down when it does not stop.
+    run_timeout_s: int = Field(default=120, ge=5, le=900)
+    # The output of a run that comes back to the agent, in characters. The
+    # rest is cut, and the result says so.
+    max_output_chars: int = Field(default=20000, ge=1000, le=200000)
+    # The bytes of all the input files of one run together.
+    max_input_bytes: int = Field(default=25 * 1024 * 1024, ge=1024, le=200 * 1024 * 1024)
+    # The kernels that run at the same time. A new conversation over the limit
+    # shuts down the kernel that was used least recently.
+    max_kernels: int = Field(default=4, ge=1, le=32)
+    # A conversation folder that no kernel uses is removed after this many hours.
+    folder_ttl_hours: int = Field(default=24, ge=1, le=720)
+
+    @field_validator("url")
+    @classmethod
+    def _check_url(cls, value: str) -> str:
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("sandbox.url must start with http:// or https://")
+        return value.rstrip("/")
+
+
 # --- assignments -------------------------------------------------------------
 
 # The efforts a model of ``assignments.models`` can name.
@@ -1530,12 +1573,13 @@ class JoshuaConfig(_Model):
     inference: Inference = Inference()
     gateway: GatewayConfig = GatewayConfig()
     assignments: Assignments = Assignments()
+    sandbox: SandboxConfig = SandboxConfig()
 
     # What is worth saying about this config without refusing to load it. The
     # validate command prints each line; a container reads the config and runs.
     _warnings: list[str] = PrivateAttr(default_factory=list)
 
-    @field_validator("limits", "gateway", "assignments", "workspaces", mode="before")
+    @field_validator("limits", "gateway", "assignments", "workspaces", "sandbox", mode="before")
     @classmethod
     def _empty_limits(cls, value: Any) -> Any:
         # strictyaml reads a key with no value as an empty string.
@@ -1684,6 +1728,12 @@ class JoshuaConfig(_Model):
         # request. The warning names the two settings that decide it.
         if self.viewer.enabled and self.viewer.auth.method == "anonymous" and anonymous is False:
             self._warnings.append(NO_VIEWER_ACCESS_WARNING)
+        return self
+
+    @model_validator(mode="after")
+    def _check_sandbox(self) -> JoshuaConfig:
+        if "sandbox" in self.mcp and not self.sandbox.enabled:
+            self._warnings.append(SANDBOX_OFF_WARNING)
         return self
 
     @model_validator(mode="after")

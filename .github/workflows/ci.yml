@@ -82,6 +82,41 @@ jobs:
       - name: tests on other dates
         run: make test-dates MEMBERS=${{ matrix.member }}
 
+  # The sandbox builtin against the real image. The image is the one that
+  # docker-compose.yml pins, with the same command, so this job proves the
+  # client and the image agree. The container has a route out here; the
+  # networks of the deployments are asserted in tests/test_sandbox_isolation.py.
+  sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --frozen --all-packages
+      - name: Start the sandbox image
+        run: |
+          image=$(uv run --with pyyaml python -c "import yaml; print(yaml.safe_load(open('docker-compose.yml'))['services']['sandbox']['image'])")
+          docker run -d --name sandbox -p 127.0.0.1:18888:8888 \
+            -e JUPYTER_TOKEN=ci-sandbox-token --read-only \
+            --tmpfs /home/jovyan:uid=1000,gid=100,mode=0700 --tmpfs /tmp \
+            --cap-drop ALL --security-opt no-new-privileges --user 1000:100 \
+            "$image" jupyter server --ServerApp.ip=0.0.0.0 --ServerApp.port=8888 \
+            --ServerApp.root_dir=/home/jovyan --ServerApp.open_browser=False \
+            --ServerApp.allow_remote_access=True --ServerApp.terminals_enabled=False
+          for i in $(seq 1 60); do
+            curl -fs http://127.0.0.1:18888/api && exit 0
+            sleep 2
+          done
+          docker logs sandbox
+          exit 1
+      - name: The sandbox tests against the image
+        env:
+          SANDBOX_TEST_URL: http://127.0.0.1:18888
+          SANDBOX_TEST_TOKEN: ci-sandbox-token
+        run: uv run --package joshua-gateway pytest gateway/tests/test_sandbox_live.py -m integration
+
   # The React app of the viewer. It builds in the gateway image too, so a
   # type error or a failed test must stop the pull request here first.
   frontend:
@@ -134,6 +169,9 @@ jobs:
       # skips them.
       - name: The assignments policy allows no host on the open web
         run: uv run --with pyyaml pytest tests/test_assignments_egress.py
+      # Only the gateway reaches the sandbox, and the sandbox reaches nothing.
+      - name: The sandbox policy allows no egress
+        run: uv run --with pyyaml pytest tests/test_sandbox_isolation.py
       # viewer.developerUrl gives the viewer DEVELOPER_URL with no other chart
       # change. Empty, the default, must leave the variable off the pod.
       - name: The viewer gets DEVELOPER_URL only when viewer.developerUrl is set
