@@ -6,6 +6,23 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+## 0.4.3 - 2026-11-27
+
+A fix release. A restart of Joshua no longer answers the last iMessage a
+second time, a Telegram message is never taken for a message of another chat,
+and the log no longer holds the secret of the iMessage webhook.
+
+### Upgrading from 0.4.2
+
+Your `joshua.yaml` and your `.env` from 0.4.2 load as they are. Core adds the
+table `turn_message_seen` at start, and drops nothing. Put
+`JOSHUA_VERSION=0.4.3` in `.env`, then run `make pull && make up`. On
+Kubernetes, install the chart at 0.4.3.
+
+The logs of 0.4.2 and older hold the iMessage webhook secret on each webhook
+line. If somebody you do not trust can read those logs, set a new
+`IMESSAGE_WEBHOOK_SECRET`, and put the new webhook URL in BlueBubbles.
+
 ### Fixes
 
 - **A restart no longer answers a message a second time.** After a restart,
