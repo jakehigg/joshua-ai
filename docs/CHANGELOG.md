@@ -6,6 +6,22 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+### Fixes
+
+- **A restart no longer answers a message a second time.** After a restart,
+  channels reads the iMessage messages of the last five minutes again, to
+  catch one that arrived while it was down. Core forgot at the same restart
+  which of them it had answered, so Joshua answered the last message again.
+  Core now keeps the id of each message in the new table `turn_message_seen`
+  for 15 minutes, so a restart of core keeps it.
+- **A Telegram message is never taken for a message of another chat.** The
+  key of the duplicate check holds the channel and the chat with the message
+  id, because a Telegram message id is unique only in its chat.
+- **The log holds no iMessage webhook secret.** The access log of channels
+  printed the whole path of the webhook, and the path holds the secret. Every
+  log line now shows `/webhook/imessage/[REDACTED]`. Rotate
+  `IMESSAGE_WEBHOOK_SECRET` if somebody you do not trust can read your logs.
+
 ## 0.4.2 - 2026-11-27
 
 A fix release for the first installation of the viewer. The import of the old

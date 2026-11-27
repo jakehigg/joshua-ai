@@ -92,3 +92,22 @@ def test_configure_from_env_reads_the_level(monkeypatch, capsys) -> None:
     lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
     assert len(lines) == 1
     assert json.loads(lines[0])["message"] == "kept"
+
+
+def test_redact_masks_the_imessage_webhook_path_secret(capsys) -> None:
+    """The path of the iMessage webhook is its credential, and the uvicorn
+    access line prints every path."""
+    assert log.redact("/webhook/imessage/s3cr3t-Value_1") == "/webhook/imessage/[REDACTED]"
+    assert log.redact("/webhook/imessage/abc?x=1") == "/webhook/imessage/[REDACTED]?x=1"
+    log.configure("INFO", "test-svc")
+    logging.getLogger("uvicorn.access").info(
+        '%s - "%s %s HTTP/%s" %d',
+        "10.0.0.1:5",
+        "POST",
+        "/webhook/imessage/s3cr3t-Value_1",
+        "1.1",
+        200,
+    )
+    out = capsys.readouterr().out
+    assert "s3cr3t-Value_1" not in out
+    assert "/webhook/imessage/[REDACTED]" in out

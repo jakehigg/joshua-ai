@@ -71,7 +71,7 @@ from joshua_core.store.db import Database
 from joshua_core.store.repo import Repo
 from joshua_core.store.seed import seed_people
 from joshua_core.transcript_api import build_transcript_router
-from joshua_core.turns import TurnService, build_router
+from joshua_core.turns import RepoMessageClaims, TurnService, build_router
 from joshua_core.update import running_version
 from joshua_core.usage_api import build_usage_router
 from joshua_core.workspaces_api import build_workspaces_router
@@ -204,7 +204,12 @@ async def lifespan(app: FastAPI):
         voice=settings.channels.voice,
     )
     turns = TurnService(
-        repo=repo, settings=settings, manager=manager, deliverer=deliverer, events=events
+        repo=repo,
+        settings=settings,
+        manager=manager,
+        deliverer=deliverer,
+        events=events,
+        claims=RepoMessageClaims(repo),
     )
     scheduler = Scheduler(
         repo=repo,
