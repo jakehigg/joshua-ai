@@ -1084,6 +1084,18 @@ holds the private data never fetches the page itself.
 [security.md](security.md#an-assignment-session-does-not-fetch-the-web)
 says why that split matters.
 
+The `internet` server is a builtin of the gateway
+([mcp-servers.md](mcp-servers.md#the-builtin-servers)). A session holds it
+when the `mcp:` section has the entry, `allow` names the person, and the
+`tools` of the spec keep the name. The gateway sends the question to core,
+which runs the internet agent in a context of its own and sends back the text
+of its answer, with the sources. A page is read only when a person gave the
+address in this assignment's conversation or an earlier answer of it returned
+the address as a source; anything else is refused, and the answer says so. So
+a session cannot have an address it found in a repository or on a page read
+for it. Without the server, the first message says so, and the session asks
+Joshua for the page or the fact with `request_resource` or `ask`.
+
 Each deployment path closes the rest:
 
 - On Kubernetes, the network policy of the chart allows egress to gateway,

@@ -21,6 +21,18 @@ with the images and the packaged chart, are at
   printed the whole path of the webhook, and the path holds the secret. Every
   log line now shows `/webhook/imessage/[REDACTED]`. Rotate
   `IMESSAGE_WEBHOOK_SECRET` if somebody you do not trust can read your logs.
+- **An assignment session can read the open web.** The session prompt sent
+  research to an `internet` server, and no such server existed: every session
+  was told to ask Joshua for each page. `internet` is now a builtin of the
+  gateway with one tool, `use_internet`: one question, and an answer with its
+  sources. The gateway sends the question to core, which runs the internet
+  agent in a context of its own, so the session gets text and never a page
+  with an egress beside it. A page is read only when a person gave the address
+  in that conversation or an earlier answer of it returned the address as a
+  source. Turn it on with an `internet` entry of `kind: builtin` in the `mcp:`
+  section of `joshua.yaml`, keep `internet.enabled: true`, and keep the name
+  in the `tools` of a spec that needs research. See
+  [mcp-servers.md](mcp-servers.md#the-builtin-servers).
 
 ## 0.4.2 - 2026-11-27
 

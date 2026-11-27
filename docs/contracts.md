@@ -155,6 +155,7 @@ Port 8000 in the container. Compose publishes it on the host as
 | `POST /v1/usage` | `usage.writers` (default `assignments`, `developer`) | `{"rows": [...]}` (below) | `{"accepted": n}`. `400` for a bad body or a row that is not of kind `assignment` or `developer`, `413` over 1 MiB, `503` when the database fails. |
 | `POST /v1/history/search` | `assignments` | `{"person", "workspace"?, "query", "limit"?}` | `{"messages": [{"at", "direction", "speaker", "text", "cut"}]}`, newest first. The chat history of a worker (below). `400` for a bad body. |
 | `POST /v1/history/read` | `assignments` | `{"person", "workspace"?, "start", "end"?, "cursor"?}` | `{"messages": [...], "cursor"}`, oldest first; `cursor` is the next page or `null`. `400` for a bad body, an `end` at or before the `start`, or a cursor that is not valid. |
+| `POST /v1/internet` | `gateway` | `{"question", "urls"?, "person"?, "conversation"?}` | `{"text"}`, the answer of the internet agent with its sources, or a line that says the internet is off, that nothing was found, or which URLs were refused. The lookup of the `internet` builtin of the gateway (below). `400 {"error": …}` for a bad body. |
 | `ANY /v1/model/{path}` | `inference.forwarder.allowed_callers` (default `assignments`) | a Claude API request | the answer of the model server, streamed (below). `401` for any other token, `403` for a path off the list, `404` when the list is empty, `502` when the server does not answer, `503` with no credential. `GET` or `HEAD` `/v1/model/api/hello` is open and answers `{}`. |
 | `GET /v1/limits` | open | | the subscription limits (below), `404` when `limits.enabled` is `false` |
 | `GET /v1/push/key` | `AUTH_CALLERS` (default `viewer`) | `person` query parameter | `{"key"}`, the public VAPID key a browser subscribes with. `503 {"error": …}` while push is not configured (below). |
@@ -648,6 +649,25 @@ A read takes `start` and `end` (default now) and pages with `cursor`. A
 message is `{"at", "direction", "speaker", "text", "cut"}`, the row as it is,
 so a report may quote a turn verbatim. Core never logs a query or a message.
 [assignments.md](assignments.md#the-chat-history) has the rest.
+
+### The internet route
+
+`POST /v1/internet` runs one lookup on the open web for a caller that holds no
+web tool. The `internet` builtin of the gateway is the one caller, and it calls
+it for each `use_internet` call of a session
+([mcp-servers.md](mcp-servers.md#the-builtin-servers)). The internet agent runs
+in core, because core holds the model credential and the register of granted
+URLs.
+
+`question` is 1 to 2000 characters, `urls` is at most 12 addresses, and
+`person` and `conversation` name who asked: the gateway takes both from the
+headers of the request, never from a tool argument. Core applies the grant rule
+of a conversation, so a URL is read only when a person gave it in that
+conversation or an earlier answer of that conversation returned it as a source.
+The agent runs in a context of its own, so what the route answers is text: the
+answer and its sources, never a page with an egress beside it. The answer never
+raises, the tokens of the lookup go into one `internet` usage row, and core
+logs no question, no URL, and no answer.
 
 ### The hold of a chat thread
 

@@ -176,10 +176,11 @@ Mark the listing tool `read` in `tools.class`, so that its class is clear.
 
 ## The builtin servers
 
-Three servers run inside the gateway and need no package: `files`, for the
+Four servers run inside the gateway and need no package: `files`, for the
 wiki and the attachments, `documents`, for the plans, reports, and other
-documents of the members, and `code-execution`, which runs Python in a
-container with no network. Turn each one on with one entry:
+documents of the members, `code-execution`, which runs Python in a
+container with no network, and `internet`, which looks one question up on the
+open web. Turn each one on with one entry:
 
 ```yaml
 mcp:
@@ -192,10 +193,26 @@ mcp:
   code-execution:
     kind: builtin
     allow: all
+  internet:
+    kind: builtin
+    allow: all
 ```
 
 `code-execution` also needs `code_execution.enabled: true` and its container.
 [code-execution.md](code-execution.md) has the steps.
+
+`internet` has one tool, `use_internet`: one question, and an answer with its
+sources. The caller holds no web tool. The lookup runs in core, which asks the
+internet agent and sends back the text of its answer, so no page reaches the
+caller with an egress beside it. A page is read only when a person gave the
+address in that conversation or an earlier answer of that conversation
+returned it as a source; anything else is refused, and the answer says so. The
+server needs `internet.enabled: true`, and with the internet off every answer
+says that it is off. The chat agent reaches the internet agent through its own
+in-process `internet` server and does not need this entry; a session of an
+assignment does, because its shell has no route to the open web. See
+[assignments.md](assignments.md#what-the-session-can-reach) and
+[config.md](config.md#internet).
 
 `documents` gives its tools to a member only, whatever `allow` says. The
 session of an assignment always holds `documents` when the person may reach
