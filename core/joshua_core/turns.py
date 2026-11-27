@@ -143,6 +143,46 @@ class SeenCache:
         self._seen[key] = now
         return False
 
+    async def claim(self, key: str) -> bool:
+        """True for the first claim of ``key`` in the window."""
+        return not self.check_and_add(key)
+
+
+class RepoMessageClaims:
+    """The message ids of the window, in the database, so they survive a restart.
+
+    A restart of channels re-reads the last minutes of iMessage, and a rollout
+    restarts core at the same time, so a cache in memory forgets the messages
+    that channels then posts again. A row in ``turn_message_seen`` does not.
+    When the database fails, the claim falls back to a cache in memory: a
+    message is never dropped because the claim could not be written.
+    """
+
+    def __init__(self, repo: Any, ttl_seconds: int = SEEN_TTL_SECONDS) -> None:
+        self._repo = repo
+        self._ttl = ttl_seconds
+        self._fallback = SeenCache(ttl_seconds)
+
+    async def claim(self, key: str) -> bool:
+        try:
+            return bool(await self._repo.claim_message(key, self._ttl))
+        except Exception as exc:  # noqa: BLE001 — a claim never stops a turn
+            logger.warning(
+                {"message": "message claim fell back to memory", "error": type(exc).__name__}
+            )
+            return await self._fallback.claim(key)
+
+
+def message_key(event: TurnEvent) -> str | None:
+    """The key of an inbound message: the channel, the chat, and the platform id.
+
+    A Telegram message id is unique only in its chat, so the id alone could
+    match a message of another chat.
+    """
+    if not event.message_id:
+        return None
+    return f"{event.channel}\x1f{event.chat.id}\x1f{event.message_id}"
+
 
 @dataclass
 class HeldMessage:
@@ -427,13 +467,14 @@ class TurnService:
         manager: Any,
         deliverer: Deliverer,
         events: EventService | None = None,
+        claims: SeenCache | RepoMessageClaims | None = None,
     ) -> None:
         self._repo = repo
         self._settings = settings
         self._manager = manager
         self._deliverer = deliverer
         self._events = events
-        self._seen = SeenCache()
+        self._claims = claims if claims is not None else SeenCache()
         self._max_hold_age = float(settings.core.hold_max_age_s)
         self._holds = HoldStore(max_age_s=self._max_hold_age)
         self._takes = TicketStore(max_age_s=self._max_hold_age)
@@ -771,7 +812,9 @@ class TurnService:
                 return JSONResponse({"reason": "events_unavailable"}, status_code=501)
             return await self._events.handle(event)
 
-        if event.message_id and self._seen.check_and_add(event.message_id):
+        key = message_key(event)
+        if key is not None and not await self._claims.claim(key):
+            logger.info({"message": "duplicate message dropped", "channel": event.channel})
             return JSONResponse({"accepted": False, "reason": "duplicate"}, status_code=200)
 
         resolution = await self.resolve(event)

@@ -511,6 +511,33 @@ class Repo:
                 (AUTH_IMPORT_MARKER_ID, rows_written),
             )
 
+    # --- inbound message ids ----------------------------------------------
+
+    async def claim_message(
+        self, key: str, ttl_seconds: int, *, conn: psycopg.AsyncConnection | None = None
+    ) -> bool:
+        """Claim an inbound message for one turn. True for the first claim.
+
+        A claim of the same key inside ``ttl_seconds`` is False: the message
+        already started a turn. The rows are in the database, so the answer
+        holds across a restart of core. Expired rows are deleted first, so an
+        old key can be claimed again and the table stays small.
+        """
+        async with self._connection(conn) as c:
+            await c.execute(
+                "DELETE FROM turn_message_seen WHERE seen_at < now() - make_interval(secs => %s)",
+                (ttl_seconds,),
+            )
+            cur = await c.execute(
+                """
+                INSERT INTO turn_message_seen (key) VALUES (%s)
+                ON CONFLICT (key) DO NOTHING
+                RETURNING key
+                """,
+                (key,),
+            )
+            return await cur.fetchone() is not None
+
     # --- conversations -----------------------------------------------------
 
     async def _select_conversation(

@@ -8,8 +8,9 @@ longer be in flight anywhere.
 
 In-memory on purpose: a pod restart loses the set, and the reconciler's
 watermark then re-reads a window that may duplicate what the pre-restart
-process already forwarded. Core is the idempotency backstop for that narrow
-case (it sees ``message_id`` on every turn).
+process already forwarded. Core is the idempotency backstop for that case: it
+claims each ``message_id`` in the database, so a message that already started
+a turn does not start a second one, also after core restarts.
 """
 
 from __future__ import annotations

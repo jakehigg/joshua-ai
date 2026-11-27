@@ -31,8 +31,9 @@ from joshua_core.memory.sources.files import FilesSource
 from joshua_core.memory.store import MemoryStore
 from joshua_core.scheduler import Scheduler
 from joshua_core.store.seed import seed_people
-from joshua_core.turns import TurnService
+from joshua_core.turns import RepoMessageClaims, TurnService, message_key
 from joshua_shared import config as config_module
+from joshua_shared.contracts import TurnEvent
 from joshua_shared.http import FleetClient
 
 pytestmark = pytest.mark.integration
@@ -119,7 +120,12 @@ async def wired(repo, tmp_path, monkeypatch):
         prompts_dir=skills_dir,
     )
     turns = TurnService(
-        repo=repo, settings=settings, manager=manager, deliverer=deliverer, events=events
+        repo=repo,
+        settings=settings,
+        manager=manager,
+        deliverer=deliverer,
+        events=events,
+        claims=RepoMessageClaims(repo),
     )
     scheduler = Scheduler(repo=repo, manager=manager, deliverer=deliverer, tz=TZ)
 
@@ -234,6 +240,28 @@ async def test_duplicate_message_id_not_rerun(wired) -> None:
     assert second.status_code == 200
     assert second.json() == {"accepted": False, "reason": "duplicate"}
     assert len(wired.received) == 1
+
+
+async def test_a_restarted_core_does_not_rerun_a_message(wired) -> None:
+    """The claim is a row, so a new process, with nothing in memory, still
+    knows the message. This is a restart of core: channels posts again the
+    messages of the last minutes it re-read from iMessage."""
+    first = await wired.client.post("/v1/turns", json=_dm_event(), headers=_bearer(CHANNELS_TOKEN))
+    await wired.turns.drain()
+    assert first.status_code == 202
+
+    restarted = RepoMessageClaims(wired.repo)
+    key = message_key(TurnEvent.model_validate(_dm_event()))
+    assert key is not None
+    assert await restarted.claim(key) is False
+
+
+async def test_a_claim_expires_after_the_window(wired) -> None:
+    assert await wired.repo.claim_message("k-1", 900) is True
+    assert await wired.repo.claim_message("k-1", 900) is False
+    # A window of zero: the row of the first claim is older than now, so it
+    # is deleted and the key is free again.
+    assert await wired.repo.claim_message("k-1", 0) is True
 
 
 async def test_scheduled_task_fires(wired) -> None:
