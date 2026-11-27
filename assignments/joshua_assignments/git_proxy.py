@@ -1,20 +1,27 @@
-"""The git proxy: a read-only git server for the sessions, on localhost.
+"""The git proxy: a read-only git server for the sessions, in its own container.
 
-A session clones over https, but its git never holds a git token. The
-manager listens on ``127.0.0.1`` on a free port, in its own process. The
-git config of the session (``$HOME/.gitconfig``, see ``git_config``) points
-each ``https://`` git URL at this listener and adds one header with a
+A session clones over https, but its git never holds a git token. The proxy
+runs in a container of its own, beside the assignments container, and it is
+the only part of the deployment that reaches the git hosts: the container of
+the session has no route to them, so a shell in a session reaches no git host
+at all. The proxy listens on ``0.0.0.0`` on :data:`LISTEN_PORT`, and
+``python -m joshua_assignments.git_proxy`` starts it.
+
+The git config of the session (``$HOME/.gitconfig``, see ``git_config``)
+points each ``https://`` git URL at the proxy and adds one header with a
 secret for the assignment:
 
-    [url "http://127.0.0.1:<port>/"]
+    [url "http://joshua-git-proxy:8003/"]
         insteadOf = https://
-    [http "http://127.0.0.1:<port>/"]
+    [http "http://joshua-git-proxy:8003/"]
         extraHeader = Authorization: Bearer <secret>
 
-The runner makes a new random secret each time a session starts, and
-forgets it when the session stops. The secret is not a git token: it opens
-only this listener, only for the repositories of that assignment, and only
-to read.
+The runner makes a new random secret each time a session starts
+(``grant_secret``), and forgets it when the session stops
+(``revoke_secrets``). The two processes share the grant through the table
+``assignments.git_grant``, which holds the SHA-256 of the secret and never
+the secret itself. The secret is not a git token: it opens only this
+listener, only for the repositories of that assignment, and only to read.
 
 For each request, the proxy:
 
@@ -31,9 +38,9 @@ For each request, the proxy:
    as HTTP Basic, and sends the request to ``https://<host>/...``. A host
    with no platform entry gets the request with no credential.
 
-The token stays in the manager. It is in no variable, file, or command line
-of the session, and in no log line. A refusal is 403 and never 401, so git
-does not ask for a password.
+The token stays in this container. It is in no variable, file, or command
+line of the session, and in no log line. A refusal is 403 and never 401, so
+git does not ask for a password.
 """
 
 from __future__ import annotations
@@ -41,29 +48,37 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
-import hmac
+import hashlib
 import os
 import secrets
 import socket
+import sys
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
 import httpx
 import uvicorn
+from joshua_shared import config, log
 from joshua_shared.config import JoshuaConfig
 from joshua_shared.log import get_logger
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse, Response, StreamingResponse
+from starlette.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from joshua_assignments.repos import RepoError, in_scope, normalize_repo, repo_allowed
-from joshua_assignments.store import Store
+from joshua_assignments.store import PgStore, Store
 
 logger = get_logger("joshua_assignments.git_proxy")
 
-LISTEN_HOST = "127.0.0.1"
+# The proxy is a container of its own, so it listens on every address of that
+# container. Only the assignments pod may reach it (the network policy of the
+# chart, the compose networks), and only with the secret of a running session.
+LISTEN_HOST = "0.0.0.0"
+# The fixed port of the listener. The session reaches it by the name of its
+# service, so the port is part of that address and never a free one.
+LISTEN_PORT = 8003
 UPLOAD_PACK = "git-upload-pack"
 RECEIVE_PACK = "git-receive-pack"
 INFO_REFS = "info/refs"
@@ -96,14 +111,16 @@ def split_path(path: str) -> tuple[str, str] | None:
     return None
 
 
-def git_config(port: int, secret: str, hosts: Iterable[str] = ()) -> str:
+def git_config(proxy_url: str, secret: str, hosts: Iterable[str] = ()) -> str:
     """The ``.gitconfig`` of a session: every git URL goes to the proxy.
 
-    ``hosts`` are the git hosts of the assignment. Their ssh forms go to the
-    proxy too, so that a URL such as ``git@host:group/name`` also works. The
-    file holds the secret of the assignment and never a git token.
+    ``proxy_url`` is the address of the proxy container, such as
+    ``http://joshua-git-proxy:8003``. ``hosts`` are the git hosts of the
+    assignment. Their ssh forms go to the proxy too, so that a URL such as
+    ``git@host:group/name`` also works. The file holds the secret of the
+    assignment and never a git token.
     """
-    base = f"http://{LISTEN_HOST}:{port}/"
+    base = proxy_url.rstrip("/") + "/"
     lines = [f'[url "{base}"]', "\tinsteadOf = https://"]
     for host in sorted(set(hosts)):
         lines.append(f'[url "{base}{host}/"]')
@@ -130,6 +147,23 @@ def write_git_config(home: Path, text: str) -> Path:
     return path
 
 
+def secret_digest(secret: str) -> str:
+    """The SHA-256 of a secret, in hex. The store holds this, never the secret."""
+    return hashlib.sha256(secret.encode()).hexdigest()
+
+
+async def grant_secret(store: Store, assignment_id: int) -> str:
+    """A new secret for the session of ``assignment_id``. It replaces an older one."""
+    secret = secrets.token_urlsafe(32)
+    await store.put_git_grant(int(assignment_id), secret_digest(secret))
+    return secret
+
+
+async def revoke_secrets(store: Store, assignment_id: int) -> None:
+    """Forget every secret of ``assignment_id``."""
+    await store.clear_git_grants(int(assignment_id))
+
+
 class _QuietServer(uvicorn.Server):
     """A uvicorn server that leaves the signals to the main server of the process."""
 
@@ -146,6 +180,7 @@ class GitProxy:
         store: Store,
         load_config: Callable[[], JoshuaConfig],
         *,
+        port: int = LISTEN_PORT,
         environ: Mapping[str, str] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
@@ -153,59 +188,75 @@ class GitProxy:
         self.load_config = load_config
         self.environ = os.environ if environ is None else environ
         self.transport = transport
-        self.port: int | None = None
-        # The secret of each running session, to the id of its assignment.
-        self._grants: dict[str, int] = {}
+        self.port = port
         self._server: _QuietServer | None = None
         self._task: asyncio.Task[None] | None = None
         self._client: httpx.AsyncClient | None = None
-        self.app = Starlette(routes=[Route("/{path:path}", self._handle, methods=["GET", "POST"])])
+        self.app = Starlette(
+            routes=[
+                Route("/healthz", self._healthz, methods=["GET"]),
+                Route("/{path:path}", self._handle, methods=["GET", "POST"]),
+            ],
+            lifespan=self._lifespan,
+        )
 
     # --- the secrets ------------------------------------------------------
 
-    def grant(self, assignment_id: int) -> str:
-        """A new secret for the session of ``assignment_id``. It replaces an older one."""
-        self.revoke(assignment_id)
-        secret = secrets.token_urlsafe(32)
-        self._grants[secret] = int(assignment_id)
-        return secret
-
-    def revoke(self, assignment_id: int) -> None:
-        """Forget every secret of ``assignment_id``."""
-        for secret, owner in list(self._grants.items()):
-            if owner == assignment_id:
-                del self._grants[secret]
-
-    def owner(self, authorization: str | None) -> int | None:
+    async def owner(self, authorization: str | None) -> int | None:
         """The assignment of the secret in ``authorization``, or None.
 
-        Every secret is compared with ``hmac.compare_digest``, with no early exit.
+        The store holds the SHA-256 of each secret, so the lookup compares a
+        digest and never the secret itself.
         """
         raw = authorization or ""
         provided = raw[len("Bearer ") :] if raw.startswith("Bearer ") else ""
-        found = None
-        for secret, owner in self._grants.items():
-            if provided and hmac.compare_digest(provided.encode(), secret.encode()):
-                found = owner
-        return found
+        if not provided:
+            return None
+        return await self.store.git_grant_owner(secret_digest(provided))
 
     # --- the listener -----------------------------------------------------
 
+    @contextlib.asynccontextmanager
+    async def _lifespan(self, app: Starlette) -> AsyncIterator[None]:
+        """Open and close the store of the standalone server (see ``main``)."""
+        await self.store.open()
+        try:
+            yield
+        finally:
+            await self.aclose_client()
+            await self.store.close()
+
+    async def _healthz(self, request: Request) -> Response:
+        return JSONResponse({"ok": True})
+
+    def client(self) -> httpx.AsyncClient:
+        """The client to the git hosts, made at the first request."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                transport=self.transport,
+                follow_redirects=False,
+                timeout=httpx.Timeout(READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
+            )
+        return self._client
+
+    async def aclose_client(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+        self._client = None
+
     async def start(self) -> int:
-        """Listen on ``127.0.0.1`` on a free port. Returns the port."""
+        """Listen on every address of the container, on ``self.port``. Returns the port.
+
+        Port 0 takes a free port, which the tests use.
+        """
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((LISTEN_HOST, 0))
+        sock.bind((LISTEN_HOST, self.port))
         self.port = int(sock.getsockname()[1])
-        config = uvicorn.Config(
+        server_config = uvicorn.Config(
             self.app, lifespan="off", log_config=None, access_log=False, server_header=False
         )
-        self._server = _QuietServer(config)
-        self._client = httpx.AsyncClient(
-            transport=self.transport,
-            follow_redirects=False,
-            timeout=httpx.Timeout(READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
-        )
+        self._server = _QuietServer(server_config)
         self._task = asyncio.create_task(self._server.serve(sockets=[sock]))
         for _ in range(500):
             if self._server.started or self._task.done():
@@ -222,9 +273,8 @@ class GitProxy:
         if self._task is not None:
             with contextlib.suppress(Exception):
                 await self._task
-        if self._client is not None:
-            await self._client.aclose()
-        self._server = self._task = self._client = None
+        await self.aclose_client()
+        self._server = self._task = None
 
     # --- one request ------------------------------------------------------
 
@@ -250,7 +300,7 @@ class GitProxy:
         return True, f"Basic {pair}"
 
     async def _handle(self, request: Request) -> Response:
-        assignment_id = self.owner(request.headers.get("authorization"))
+        assignment_id = await self.owner(request.headers.get("authorization"))
         if assignment_id is None:
             logger.warning({"message": "git proxy refused: missing or wrong secret"})
             return _refuse("Missing or wrong assignment secret.\n")
@@ -295,7 +345,7 @@ class GitProxy:
         credential: str | None,
         assignment_id: int,
     ) -> Response:
-        assert self._client is not None
+        client = self.client()
         host, _, path = repo.partition("/")
         url = f"https://{host}/{path}.git/{suffix}"
         headers = {k: v for k, v in request.headers.items() if k.lower() in REQUEST_HEADERS}
@@ -307,7 +357,7 @@ class GitProxy:
             async for chunk in request.stream():
                 yield chunk
 
-        upstream = self._client.build_request(
+        upstream = client.build_request(
             request.method,
             url,
             params=params,
@@ -315,7 +365,7 @@ class GitProxy:
             content=body() if request.method == "POST" else None,
         )
         try:
-            reply = await self._client.send(upstream, stream=True)
+            reply = await client.send(upstream, stream=True)
         except httpx.HTTPError as exc:
             logger.warning(
                 {
@@ -354,3 +404,46 @@ class GitProxy:
                 await reply.aclose()
 
         return StreamingResponse(stream(), status_code=200, headers=out_headers)
+
+
+def main() -> None:
+    """Run the proxy as its own container: ``python -m joshua_assignments.git_proxy``.
+
+    It needs ``DATABASE_URL``, the same database as the manager, and the read
+    token of each git host, under the name that
+    ``assignments.platforms.<host>.token_env`` gives. It holds no fleet token
+    and no model credential, and it reads no volume of the instance.
+    """
+    logger = log.configure_from_env("joshua-git-proxy")
+    try:
+        cfg = config.load()
+    except config.ConfigError as exc:
+        print(f"config error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    if not cfg.assignments.enabled:
+        logger.error(
+            {
+                "message": "assignments is disabled; set assignments.enabled: true "
+                "in joshua.yaml to start the git proxy"
+            }
+        )
+        raise SystemExit(1)
+    database_url = (os.environ.get("DATABASE_URL") or "").strip()
+    if not database_url:
+        print("settings error: DATABASE_URL is required", file=sys.stderr)
+        raise SystemExit(1)
+    # The manager owns the schema; this process only reads a grant and a row.
+    proxy = GitProxy(PgStore(database_url, apply_schema=False), config.load)
+    logger.info({"message": "git proxy listening", "port": LISTEN_PORT})
+    uvicorn.run(
+        proxy.app,
+        host=LISTEN_HOST,
+        port=LISTEN_PORT,
+        log_config=None,
+        access_log=False,
+        server_header=False,
+    )
+
+
+if __name__ == "__main__":
+    main()

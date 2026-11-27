@@ -1485,7 +1485,7 @@ characters.
 | `stall_slices` | `3` | The slices in a row with no new checkpoint after which the runner stops the assignment as `waiting` with an automatic question. The question names the last checkpoint and the last tool errors. At least `1`. See [assignments.md](assignments.md#a-stalled-assignment). |
 | `keep_failed_work` | `7d` | How long the scratch directory of an assignment that ended as `failed`, `budget_exceeded`, or `time_exceeded` stays. The container removes it at start, or when an assignment stops, after this time. |
 | `repos` | `[]` | The repositories an assignment may clone: `host/group/name`, or `host/group/*` for a whole group. Lower case. `*` also matches a subgroup. `start_assignment` checks each repository of a spec, and the git proxy checks it again at each clone and fetch. |
-| `platforms` | `{}` | Git host to `kind` (`github`, `gitlab`, `git`) and `token_env`, the name of the variable that holds its read token. The manager puts the token on each clone of a session; the session never sees it. A host with no entry gets its requests with no credential. |
+| `platforms` | `{}` | Git host to `kind` (`github`, `gitlab`, `git`) and `token_env`, the name of the variable that holds its read token. The git proxy, in its own container, puts the token on each clone of a session; the session never sees it. A host with no entry gets its requests with no credential. |
 | `people` | `{}` | Person id to `notify`, the destination of the report and the questions of an assignment with `report_to: conversation`. Each key must be in `people`. |
 | `read_callers` | `viewer` | The fleet identities that may call the read API of the container (`GET /v1/assignments`, `GET /v1/saved`, and the comment routes). Each one needs its `JOSHUA_TOKEN_<NAME>` in the environment of the container. An empty value turns the read API off, and every caller gets 401. It cannot name `assignments`. See [assignments.md](assignments.md#the-read-api). |
 
@@ -1529,9 +1529,10 @@ The bearers and the database are not in this section. They are variables of
 the container: `DATABASE_URL`, `ASSIGNMENTS_TOKENS`, `ADDON_TOKEN`,
 `CHANNELS_URL`, `JOSHUA_TOKEN_ASSIGNMENTS`, and the token of each read
 caller, such as `JOSHUA_TOKEN_VIEWER`. `.env.example` documents them. The
-token of each git host is a variable of the container too, under the name
-that its `token_env` gives. In compose, put it in
-`.env.assignments`. On Kubernetes, add it to `secrets.assignments`.
+`GIT_PROXY_URL` names the git proxy, which is a container of its own. The
+token of each git host is a variable of that container, under the name that
+its `token_env` gives. In compose, put it in `.env.assignments`, which only
+the proxy reads for a git token. On Kubernetes, add it to `secrets.gitProxy`.
 
 ## inference
 

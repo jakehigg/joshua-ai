@@ -53,7 +53,8 @@ Each block gives a default Secret in `name` and the variables in `keys`:
 | `secrets.channels` | `TELEGRAM_BOT_TOKEN`, `BLUEBUBBLES_PASSWORD`, `IMESSAGE_WEBHOOK_SECRET`, and every `JOSHUA_TOKEN_*` |
 | `secrets.gateway` | Every `JOSHUA_TOKEN_*`, and one key for each upstream credential an MCP server reads |
 | `secrets.postgres` | `POSTGRES_PASSWORD`, when the chart runs Postgres |
-| `secrets.assignments` | `DATABASE_URL`, `JOSHUA_TOKEN_ASSIGNMENTS`, `ASSIGNMENTS_TOKENS`, `ADDON_TOKEN`, and the `token_env` of each git host, when the assignments container runs |
+| `secrets.assignments` | `DATABASE_URL`, `JOSHUA_TOKEN_ASSIGNMENTS`, `ASSIGNMENTS_TOKENS`, `ADDON_TOKEN`, when the assignments container runs |
+| `secrets.gitProxy` | `DATABASE_URL`, and the `token_env` of each git host, when the git proxy runs |
 
 An empty value takes the variable from `name`, under a key of the same
 spelling. Give `name` or `key` to take one variable from somewhere else:
@@ -320,6 +321,7 @@ Two switches turn it on, and both are needed:
 # 1. put the pod in the cluster
 assignments:
   enabled: true
+gitProxy:
   networkPolicy:
     gitHosts:
       cidrs: [<address range of each git host>]
@@ -342,14 +344,8 @@ gateway Secrets, so channels accepts the events the container sends.
 kubectl -n <namespace> create secret generic joshua-assignments-secrets \
   --from-literal=DATABASE_URL="$DATABASE_URL" \
   --from-literal=JOSHUA_TOKEN_ASSIGNMENTS="$JOSHUA_TOKEN_ASSIGNMENTS" \
-  --from-literal=ASSIGNMENTS_TOKENS="alex=$ASSIGNMENTS_TOKEN_ALEX" \
-  --from-literal=ASSIGNMENTS_GITLAB_TOKEN="$GITLAB_READ_TOKEN"
+  --from-literal=ASSIGNMENTS_TOKENS="alex=$ASSIGNMENTS_TOKEN_ALEX"
 ```
-
-The last key is the read token of a git host in `assignments.platforms`,
-under the name that its `token_env` gives. Add the same name to
-`secrets.assignments.keys`. The manager puts the token on each clone of a
-session, and the session never sees it.
 
 When the viewer is on, add `JOSHUA_TOKEN_VIEWER` to the same Secret, with the
 value of the viewer Secret. The manager checks it on its read API, so the
@@ -357,21 +353,57 @@ viewer can show each person their assignments.
 
 The network policy lets only the gateway reach the pod, and the viewer too
 when `viewer.enabled` is true. It lets the pod reach only gateway, channels,
-core (the model forwarder), the database, the cluster DNS, and the address
-ranges of the git hosts. A session has no route to the open web: its research
-goes to the `internet` MCP server through the gateway.
-
-The git-host ranges belong to the git proxy of the manager, which fetches from
-each host itself. A network policy matches addresses, not names, so give the
-address range of each git host in
-`assignments.networkPolicy.gitHosts.cidrs`, and leave the list empty when no
-assignment clones from a host on the open web. The proxy runs in the same
-container as the session, so a shell in the session can still reach those
-ranges on 443; the rule in the session prompt, not this policy, keeps research
-off that path. Set
+core (the model forwarder), the database, the cluster DNS, and the git proxy.
+The pod has no route off the cluster: its research goes to the `internet` MCP
+server through the gateway, and its clone to the git proxy. Set
 `assignments.networkPolicy.enabled: false` on a cluster with no network policy
 support. `/work` is an emptyDir unless `assignments.work.existingClaim` names a
 claim.
+
+### The git proxy
+
+A session clones over https and never holds a git token: it clones through the
+git proxy, a read-only git server that puts the token of the host on the fetch
+itself. The proxy is the assignments image with another entry point, it runs in
+its own pod, and it renders with the assignments container (`gitProxy.enabled`,
+true by default).
+
+The proxy is the one pod of the release that reaches a git host, and it runs
+beside the session pod and never in it: a network policy selects a pod, so a
+rule that opened a git host to the proxy would open it to a shell in a session
+too. Its own policy lets only the assignments pod reach it, on 8003, and lets
+it reach the cluster DNS, the database, and the git hosts:
+
+```yaml
+gitProxy:
+  networkPolicy:
+    gitHosts:
+      cidrs: [<address range of each git host>]
+    # When postgres.enabled is false, the range of your own database.
+    database:
+      cidrs: [<address range of the database>]
+```
+
+A network policy matches addresses, not names, so give the address range of
+each git host in `assignments.repos`, and leave the list empty when no
+assignment clones from a host outside the cluster. A git host behind an ingress
+of this cluster needs the pod range of the cluster as well: Kubernetes rewrites
+the address of a LoadBalancer to the address of the ingress pod before the
+policy is checked.
+
+Make the Secret named by `secrets.gitProxy`, with the read token of each git
+host in `assignments.platforms`, under the name that its `token_env` gives:
+
+```
+kubectl -n <namespace> create secret generic joshua-git-proxy-secrets \
+  --from-literal=ASSIGNMENTS_GITLAB_TOKEN="$GITLAB_READ_TOKEN"
+```
+
+Add the same name to `secrets.gitProxy.keys`. `DATABASE_URL` reads the key of
+the assignments Secret, so one database credential serves both pods; the proxy
+reads the grant of a running session and the row of its assignment there. The
+proxy holds no fleet token: the secret of the session, which the manager writes
+into the `.gitconfig` of that session, is what opens the listener.
 
 ## Enhancements
 

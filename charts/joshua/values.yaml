@@ -169,10 +169,9 @@ secrets:
   # keeps its rows in the schema `assignments`. JOSHUA_TOKEN_ASSIGNMENTS is its
   # own fleet token, for the events it posts to channels. ASSIGNMENTS_TOKENS is
   # every bearer of a person, as `<person-id>=<token>` pairs, comma separated.
-  # ADDON_TOKEN is a bearer that names no person and may only read. Add the
-  # read token of each git host in assignments.platforms as one more key,
-  # under the name that its token_env gives, such as ASSIGNMENTS_GITLAB_TOKEN.
-  # Only the manager reads it; a session clones through the manager.
+  # ADDON_TOKEN is a bearer that names no person and may only read. The read
+  # token of a git host is not here: it belongs to the git proxy, in its own
+  # pod, under `gitProxy` below.
   # The code execution pod holds one credential: the token of its own Jupyter
   # server. The gateway reads the same key as CODE_EXECUTION_TOKEN.
   codeExecution:
@@ -192,6 +191,20 @@ secrets:
       # the viewer can show a person their assignments. It is never a bearer
       # of /mcp.
       JOSHUA_TOKEN_VIEWER: {}
+  # The git proxy, in its own pod. Add the read token of each git host in
+  # assignments.platforms as one more key here, under the name that its
+  # token_env gives, such as ASSIGNMENTS_GITLAB_TOKEN:
+  #   ASSIGNMENTS_GITLAB_TOKEN: {}
+  # The proxy is the only pod that holds a git token, and the only one that
+  # reaches a git host. It holds no fleet token: the secret of a running
+  # session, which the manager writes into the .gitconfig of that session, is
+  # what opens the listener. DATABASE_URL reads the key of the assignments
+  # Secret, so the two pods share one database credential; name another Secret
+  # here to keep them apart.
+  gitProxy:
+    name: joshua-git-proxy-secrets
+    keys:
+      DATABASE_URL: {name: joshua-assignments-secrets, key: DATABASE_URL}
 
 # The shared /data volume. All three containers mount it at once, so the access
 # mode is ReadWriteMany and the class must support it.
@@ -372,8 +385,10 @@ assignments:
     existingClaim: ""
     sizeLimit: 10Gi
   # The pod may reach only gateway, channels, core (the model forwarder), the
-  # database, DNS, and the git hosts below. A session gets no route to the open
-  # web: research goes to the `internet` MCP server through the gateway. Only
+  # database, DNS, and the git proxy. It has no route off the cluster: a
+  # session holds private data and a shell, so research goes to the `internet`
+  # MCP server through the gateway, and a clone goes to the git proxy, which
+  # holds the git-host ranges in its own policy (see `gitProxy` below). Only
   # the gateway may reach the pod, and the viewer too when viewer.enabled is
   # true (the read API).
   networkPolicy:
@@ -385,18 +400,6 @@ assignments:
         kubernetes.io/metadata.name: kube-system
       podSelector:
         k8s-app: kube-dns
-    # The git proxy of the manager fetches from each git host itself, so these
-    # ranges are the one route out of the pod. A network policy matches
-    # addresses, not names. Give the address range of each git host in
-    # `assignments.repos`, such as 192.0.2.10/32. Leave the list empty when no
-    # assignment clones from a host on the open web.
-    #
-    # The proxy runs in the same container as the session, so a shell in the
-    # session can still reach these ranges on 443. The rule in the session
-    # prompt, not this policy, keeps research off that path.
-    gitHosts:
-      cidrs: []
-      ports: [443]
     # The database when `postgres.enabled` is false: its address range.
     database:
       cidrs: []
@@ -411,6 +414,57 @@ assignments:
     limits:
       cpu: "2"
       memory: 2Gi
+
+# The git proxy: the read-only git server of the sessions, in a pod of its own.
+# It renders with the assignments container and is the one pod that reaches the
+# git hosts. A session clones through it and never holds a git token.
+#
+# Turn it off only for an installation whose assignments clone nothing: then a
+# session gets no .gitconfig, and `git clone` in a session fails.
+gitProxy:
+  enabled: true
+  replicaCount: 1
+  # A whole image reference. Empty means the assignments image, which holds the
+  # proxy as a second entry point.
+  image: ""
+  networkPolicy:
+    enabled: true
+    # The DNS pods, as in `assignments.networkPolicy.dns`. The proxy resolves
+    # each git host by name before it fetches.
+    dns:
+      namespaceSelector:
+        kubernetes.io/metadata.name: kube-system
+      podSelector:
+        k8s-app: kube-dns
+    # The git hosts. A network policy matches addresses, not names, so give the
+    # address range of each git host in `assignments.repos`, such as
+    # 192.0.2.10/32. These ranges are the one route out of this pod, and they
+    # are in no other policy of the release. Leave the list empty when no
+    # assignment clones from a host outside the cluster.
+    #
+    # A git host behind an ingress of this cluster needs the pod range of the
+    # cluster here as well: Kubernetes rewrites the address of a LoadBalancer
+    # to the address of the ingress pod before the policy is checked, so a
+    # range that holds the LoadBalancer address alone never matches.
+    gitHosts:
+      cidrs: []
+      ports: [443]
+    # The database when `postgres.enabled` is false: its address range. The
+    # proxy reads the grant of a session and the row of its assignment, so it
+    # needs the same database as the manager.
+    database:
+      cidrs: []
+      port: 5432
+    # More `from` entries for the ingress rule, for a CNI that also needs
+    # the kubelet's probes to be allowed.
+    extraIngress: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 # Code execution: the stock Jupyter scipy image, which runs Python for the
 # `code-execution` builtin of the gateway. Off by default. docs/code-execution.md has the

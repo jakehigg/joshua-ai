@@ -205,20 +205,24 @@ async def test_a_grant_over_the_ceiling_is_stored_and_stays_parked(tmp_path, cha
 
 async def test_a_granted_repo_reaches_the_git_config_of_the_session(tmp_path, channels) -> None:
     store = FakeStore()
-    h = Harness(tmp_path, FakeSdk(finishing()), FakeCore(), store=store, extra=GIT_EXTRA)
+    h = Harness(
+        tmp_path,
+        FakeSdk(finishing()),
+        FakeCore(),
+        store=store,
+        extra=GIT_EXTRA,
+        git_proxy_url="http://joshua-git-proxy:8003",
+    )
     row_id = await make_running(
         store, h.work, session=None, granted_repos=["other.example.net/a/b"]
     )
 
-    class Proxy:
-        port = 4321
-
-        def grant(self, assignment_id: int) -> str:
-            return "s3cret"
-
-    h.runner.git = Proxy()  # type: ignore[assignment]
-    h.runner._git_setup(await store.get(row_id), tmp_path)
-    assert "insteadOf = git@other.example.net:" in (tmp_path / ".gitconfig").read_text()
+    await h.runner._git_setup(await store.get(row_id), tmp_path)
+    text = (tmp_path / ".gitconfig").read_text()
+    assert "insteadOf = git@other.example.net:" in text
+    assert '[url "http://joshua-git-proxy:8003/"]' in text
+    # The secret is in the store as a digest, under the assignment of the session.
+    assert list(store.git_grants.values()) == [row_id]
 
 
 def test_the_first_prompt_puts_a_granted_repo_in_scope(tmp_path) -> None:

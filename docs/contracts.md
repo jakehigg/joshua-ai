@@ -973,8 +973,9 @@ another person is `404`, and so is a comment of another person. A deleted
 draft is `404`, and no list holds it.
 [assignments.md](assignments.md#the-read-api) has the shapes.
 
-The git proxy is internal. It listens on `127.0.0.1` on a free port, in the
-manager process, and no other container can reach it. Only the git of a
+The git proxy is internal. It runs in a container of its own and listens on
+port 8003, and only the assignments container may reach it: the network policy
+of the chart and the compose networks allow no other caller. Only the git of a
 session calls it, through the `.gitconfig` that the runner writes in the
 `HOME` of the session.
 

@@ -6,19 +6,21 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
-### Assignments
-
-- **An assignment session can read the open web.** The session prompt sent
-  research to an `internet` server, and no such server existed: every session
-  was told to ask Joshua for each page. `internet` is now a builtin of the
-  gateway with one tool, `use_internet`: one question, and an answer with its
-  sources. The gateway sends the question to core, which runs the internet
+- **An assignment session reaches no git host.** The git proxy is a container
+  of its own, `assignments-git-proxy` in compose and the `joshua-git-proxy`
+  pod in the chart: it is the one container with a route to the git hosts, and
+  the session container has none. A clone works as before, and the session
+  still holds no git token. The two containers share the secret of a session
+  through the new table `assignments.git_grant`, which holds a digest and
+  never the secret. `docs/assignments.md` and `docs/security.md` have the
+  shape.
+- **An assignment session can read the open web.** `internet` is a builtin of
+  the gateway with one tool, `use_internet`: one question, and an answer with
+  its sources. The gateway sends the question to core, which runs the internet
   agent in a context of its own, so the session gets text and never a page
-  with an egress beside it. A page is read only when a person gave the address
-  in that conversation or an earlier answer of it returned the address as a
-  source. Turn it on with an `internet` entry of `kind: builtin` in the `mcp:`
-  section of `joshua.yaml`, keep `internet.enabled: true`, and keep the name
-  in the `tools` of a spec that needs research. See
+  with an egress beside it. Turn it on with an `internet` entry of
+  `kind: builtin` in the `mcp:` section of `joshua.yaml`, and keep the name in
+  the `tools` of a spec that needs research. See
   [mcp-servers.md](mcp-servers.md#the-builtin-servers).
 
 ## 0.4.3 - 2026-11-27

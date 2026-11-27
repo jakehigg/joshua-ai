@@ -207,10 +207,9 @@ give a session all of them, so the agent in core has no shell and no file
 tool. A long job needs a checkout, a shell, and file tools. The `assignments`
 container holds those, and no secret that core holds:
 
-- It holds no model credential and no MCP credential. It holds the read
-  token of each git host that you name in `assignments.platforms`. Only the
-  manager uses it, and a session never sees it (see
-  [repositories](#repositories)).
+- It holds no model credential, no MCP credential, and no git token: the read
+  token of each git host is in the git proxy, which is a container of its own
+  (see [repositories](#repositories)).
 - It holds one fleet token of its own, `JOSHUA_TOKEN_ASSIGNMENTS`. It uses
   the token to send events to channels, to read and write usage on core, to
   send the model calls of a session through core, and to reach the MCP
@@ -218,9 +217,9 @@ container holds those, and no secret that core holds:
 - The gateway calls `/mcp`. The viewer calls the [read API](#the-read-api)
   with its own fleet token. On Kubernetes, a network policy lets only these
   two reach it, and lets it reach only gateway, channels, core, the
-  database, DNS, and the address ranges of the git hosts you name. With
-  compose it is on the `closed` network alone, which has no route off the
-  host. So a session has no route to the open web (see
+  database, DNS, and the git proxy. With compose it is on the `closed`
+  network alone, which has no route off the host. So a session has no route
+  to the open web and none to a git host (see
   [what the session can reach](#what-the-session-can-reach)).
 - It mounts `/data` read-only and writes nothing there.
 
@@ -815,32 +814,42 @@ ended gets `finished`.
 
 A session clones the repositories of its spec over HTTPS, with the full
 history, into `/work/<id>/repos/<name>`. The first message gives the clone
-command of each one. The git token stays in the manager:
+command of each one. The git token stays in the git proxy, which is a
+container of its own:
 
-- The manager listens on `127.0.0.1`, on a free port, in its own process. No
-  other container can reach this listener, and it needs no setting.
+- The proxy is the assignments image with another entry point,
+  `python -m joshua_assignments.git_proxy`. It listens on port 8003, and it is
+  the one container of the deployment that reaches the git hosts. The
+  container of the session has no route to them, so a command in a session
+  reaches no git host at all.
+- `GIT_PROXY_URL` gives the manager the address of the proxy, such as
+  `http://assignments-git-proxy:8003`. Without it a session gets no
+  `.gitconfig`, so it clones nothing.
 - Each time a session starts, the runner makes a new random secret for it,
   and writes `$HOME/.gitconfig` in the session. The file sends every
-  `https://` git URL to the listener, with the secret in a header. It holds
-  no git token. The secret goes when the session stops.
-- For each request, the manager finds the assignment of the secret, and
+  `https://` git URL to the proxy, with the secret in a header. It holds no
+  git token. The secret goes when the session stops.
+- The two processes share the secret through the table
+  `assignments.git_grant`, which holds the SHA-256 of the secret and never the
+  secret itself.
+- For each request, the proxy finds the assignment of the secret, and
   checks that the repository is in the `repos` of the spec or in
   `granted_repos` (see [requests](#requests-for-a-repository-or-a-file)),
   and matches `assignments.repos` now. Then it reads the token of the host from the
   variable that `assignments.platforms.<host>.token_env` names, puts it on
   the request, and sends the request to the host.
-- A push is refused. The manager forwards only the requests of a clone or a
+- A push is refused. The proxy forwards only the requests of a clone or a
   fetch. The container never pushes: a change to a repository goes through
   another tool of the person, or into a follow-up.
 - A repository outside the spec and the granted repositories, or outside
   `assignments.repos`, gets no credential: `start_assignment` and
-  `grant_repo` refuse it, and the listener refuses it again at each clone.
+  `grant_repo` refuse it, and the proxy refuses it again at each clone.
 - A host with no entry in `assignments.platforms` gets its requests with no
   credential, for a public repository.
 
 So the token is in no variable of the session, in no file under its `HOME`,
-and in no log line. Tests prove each of these, and the refused push, with a
-local bare repository.
+in no log line, and in no container that a session runs in. Tests prove each
+of these, and the refused push, with a local bare repository.
 
 ## The plan, the outputs, and the report
 
@@ -1070,8 +1079,8 @@ A session holds private data: the wiki and the files of the person through the
 tools of the person, the documents of the person, and each repository that it
 cloned. So it reaches three places, and no host on the open web:
 
-- **the git proxy of the manager**, on `127.0.0.1`. Every `https://` git URL
-  of the session goes there (see [repositories](#repositories));
+- **the git proxy**, in its own container. Every `https://` git URL of the
+  session goes there (see [repositories](#repositories));
 - **the model forwarder in core**, which puts the model credential on each
   model call;
 - **the MCP servers of the person, through the gateway**, which is where
@@ -1099,24 +1108,15 @@ Joshua for the page or the fact with `request_resource` or `ask`.
 Each deployment path closes the rest:
 
 - On Kubernetes, the network policy of the chart allows egress to gateway,
-  channels, core, the database, the cluster DNS, and the address ranges of
-  `assignments.networkPolicy.gitHosts.cidrs`. It names no other destination.
+  channels, core, the database, the cluster DNS, and the git proxy on 8003. It
+  names no other destination, and no address range of a git host.
 - With compose, the container is on the `closed` network alone, and that
   network has no route off the host.
 
-Two limits stay. The git proxy fetches from the git host itself and runs in
-the same container as the session, so a command in the session can still
-reach the address ranges of those hosts on port 443. The rule in the session
-prompt, not the network, keeps research off that path, and closing it needs
-the proxy in a container of its own. The cluster resolver also still answers
-for a public name, which the session then cannot reach.
-
-**With compose, a clone from a git host on the open web needs one line.** The
-`closed` network has no route to that host. Add `- default` to the `networks`
-list of the `assignments` service in `docker-compose.yml`, and allow the
-addresses of that host alone in a firewall around the host. Then a command in
-the session can reach the open web again, and only the prompt rule keeps it
-off.
+So a command in the session reaches no host on the open web, the git hosts
+included: the proxy, in its own container, is what reaches them, and a shell
+in the session has no route there. One limit stays: the resolver answers for a
+public name, which the session then cannot reach.
 
 ## The statuses
 
@@ -1237,7 +1237,9 @@ the destination, never the text or a token.
 
 The container keeps its rows in the shared Postgres, in the schema
 `assignments`, apart from the tables of core. It makes the schema at start:
-the tables `assignment`, `checkpoint`, `slice`, `saved`, and `comment`. A row of
+the tables `assignment`, `git_grant`, `checkpoint`, `slice`, `saved`, and
+`comment`. A row of `git_grant` is the secret of one running session, as a
+SHA-256 digest, which the git proxy reads to find the assignment of a clone. A row of
 `saved` holds the person, the name, and the spec of a saved assignment. The
 column `saved_id` of `assignment` names the saved assignment of a run, and
 becomes null when that saved assignment is deleted. The row of an assignment
@@ -1288,17 +1290,16 @@ sent before the slice ended is stored.
 
 7. For each git host in `assignments.platforms`, put a read token in
    `.env.assignments`, under the name that its `token_env` gives, for
-   example `ASSIGNMENTS_GITLAB_TOKEN=<token>`. Only this container reads the
-   file. A host on the open web also needs the route that
-   [what the session can reach](#what-the-session-can-reach) describes: the
-   container is on the `closed` network alone.
-8. Start the container: `make up`. It starts the assignments container
-   because `assignments.enabled` is `true`.
+   example `ASSIGNMENTS_GITLAB_TOKEN=<token>`. Only the git proxy reads the
+   git tokens from the file.
+8. Start the containers: `make up`. It starts the assignments container and
+   the git proxy beside it, because `assignments.enabled` is `true`.
 9. Run `make restart`, so the gateway reads the new server.
 
 An assignment needs no `files` server: the plan and the report are in the
-store. Compose sets `CORE_URL` and `GATEWAY_URL` for the container. The container
-does not start without them and `JOSHUA_TOKEN_ASSIGNMENTS`.
+store. Compose sets `CORE_URL`, `GATEWAY_URL`, and `GIT_PROXY_URL` for the
+container. The container does not start without `CORE_URL`, `GATEWAY_URL`, and
+`JOSHUA_TOKEN_ASSIGNMENTS`.
 
 The container is not published on the host. With `assignments.enabled: false`
 it exits at start and its log says why. On Kubernetes, see the chart
