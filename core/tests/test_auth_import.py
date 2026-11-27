@@ -271,6 +271,32 @@ async def test_a_failing_marker_write_leaves_nothing_behind() -> None:
     assert repo.marker is None
 
 
+async def test_an_id_only_the_environment_names_is_skipped_by_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``viewer.users`` says who may sign in. An id that only the
+    environment names gets no secret, and the log names it, so a run that
+    reads ``VIEWER_PASSWORDS`` alone does not look like a run with no input."""
+    lines: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        auth_import.logger, "info", lambda payload: lines.append(payload), raising=False
+    )
+    monkeypatch.setenv("VIEWER_PASSWORDS", f"rob={ALEX_HASH}")
+    monkeypatch.setenv("VIEWER_PW_SAM_LEE", "sam-password")
+    monkeypatch.setenv("VIEWER_PW_EMPTY", "  ")
+    repo = FakeRepo(people=["alex", "mia", "rob", "sam-lee"])
+
+    summary = await import_once(repo, _settings())
+
+    assert summary == {"ran": True, "imported": 0, "skipped": 2, "unreadable": 2}
+    assert repo.secrets == {}
+    assert repo.marker is None
+    skips = [line for line in lines if line.get("why") == "not in viewer.users"]
+    assert [line["person"] for line in skips] == ["rob", "sam-lee"]
+    # No line carries a secret or a hash.
+    assert not [line for line in lines if "sam-password" in str(line) or "$2" in str(line)]
+
+
 # --- the log ---------------------------------------------------------------
 
 

@@ -530,6 +530,27 @@ instead: it builds the images locally. A release is the tested, multi-arch,
 versioned build, and the default. To go back to one, put its version back in
 `JOSHUA_VERSION` and run `make pull && make up` again.
 
+### Run a second checkout on the same host
+
+Compose names the containers and the volumes after the project, and the
+project name is the name of the directory unless `.env` sets it. Two
+checkouts in directories with the same name, for example two clones called
+`joshua-ai`, share one database and one `/data`. Give the second one a name of
+its own in its `.env`:
+
+```
+COMPOSE_PROJECT_NAME=joshua-test
+```
+
+Two more things are shared on one host, whatever the project name is:
+
+- The ports. Each stack publishes `8080`, `8081` and `8082`, so only one stack
+  runs at a time. Run `make down` in the first checkout before `make up` in
+  the second.
+- The images of `make up-dev`. Each build is tagged `joshua-ai-<component>:dev`,
+  so a build in one checkout replaces the build of the other. Run `make up-dev`
+  again in a checkout before you use its build.
+
 ## Back up and restore
 
 A backup is three things: the database, the `/data` volume, and the two config
@@ -778,6 +799,19 @@ logs `no frontend build; the React pages are off` at start and serves the
 JSON API alone, so every address answers 404 until the image carries a build.
 Nothing off the host reaches it: put a reverse proxy in front, for TLS, before
 you expose it.
+
+The proxy must send the `Host` header of the browser to the viewer, not its
+own upstream address. The viewer compares the `Origin` of each write with
+`Host`, and refuses a write when they differ. With the wrong `Host`, every
+write is `403`, and the sign-in page says only "That sign-in did not work."
+for a correct PIN. The viewer log then has the line `viewer write refused:
+the Origin does not match the Host`, with the two values. Caddy and a
+Kubernetes ingress send the `Host` of the browser by default. nginx does not.
+Add this line to the `location` that holds `proxy_pass`:
+
+```
+proxy_set_header Host $host;
+```
 
 A member sees a "move this page to trash" button on a wiki page. It moves the
 page to `wiki/.trash/` and drops it from the search index at the next index run.

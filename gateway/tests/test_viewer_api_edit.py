@@ -252,6 +252,28 @@ def test_a_cross_site_origin_is_403(client, tmp_path) -> None:
     assert (tmp_path / "data/wiki/recipes.md").read_text() == RECIPES
 
 
+def test_a_refused_origin_logs_the_origin_and_the_host(client, monkeypatch) -> None:
+    """A proxy that rewrites ``Host`` fails every write, so the refusal names
+    both values. A matching origin logs nothing."""
+    lines: list[dict] = []
+    monkeypatch.setattr(edit_api.logger, "info", lambda payload: lines.append(payload))
+    body = {"path": "wiki/recipes.md", "csrf": viewer._csrf_token("alex", "wiki/recipes.md")}
+    proxied = {"Origin": "https://wiki.example", "Host": "127.0.0.1:8082"}
+    assert client.post("/api/v1/delete", json=body, headers=proxied, auth=ALEX).status_code == 403
+    refused = [line for line in lines if "Origin does not match" in str(line.get("message"))]
+    assert refused == [
+        {
+            "message": "viewer write refused: the Origin does not match the Host",
+            "origin": "https://wiki.example",
+            "host": "127.0.0.1:8082",
+        }
+    ]
+    lines.clear()
+    same = {"Origin": "https://wiki.example", "Host": "wiki.example"}
+    client.post("/api/v1/delete", json=body, headers=same, auth=ALEX)
+    assert not [line for line in lines if "Origin does not match" in str(line.get("message"))]
+
+
 def test_a_body_that_is_not_a_json_object_is_400(client) -> None:
     response = client.post("/api/v1/save", content=b"not json", auth=ALEX)
     assert response.status_code == 400

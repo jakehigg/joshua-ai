@@ -6,6 +6,29 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+### Fixes
+
+- **The import of the old viewer passwords names each id it skips.** The
+  import reads only the people that `viewer.users` names, as the old viewer
+  did. An id that only `VIEWER_PASSWORDS` or `VIEWER_PW_<ID>` names now gets
+  the log line `auth import skipped` with `why: not in viewer.users`, where it
+  was skipped with no line before. `make validate`, `.env.example`, and
+  `docs/auth.md` now say to keep `viewer.users` until the import has run.
+- **A refused write of the viewer logs why.** When the `Origin` of a write
+  does not match its `Host`, the viewer logs both values. A reverse proxy that
+  sends its own address as `Host` refuses every write, the sign-in too, and
+  the page says only "That sign-in did not work.". `docs/operations.md` now
+  says that the proxy must send the `Host` of the browser, with the nginx line.
+- **The startup warning for `viewer.anonymous: <person>` gives a fix that
+  works.** With `viewer.auth.method: anonymous`, it now says to set a method
+  that asks for a secret as well, because `viewer.anonymous: false` alone
+  leaves a viewer that nobody can read.
+- **The docs say how to run a second checkout on one host.** Set
+  `COMPOSE_PROJECT_NAME` in its `.env`, or two directories with the same name
+  share one database and one `/data`. The ports and the `:dev` images stay
+  shared. See "Run a second checkout on the same host" in
+  `docs/operations.md`.
+
 ## 0.4.1 - 2026-11-27
 
 Joshua can run Python: the new `code-execution` builtin computes in a
