@@ -6,6 +6,47 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+## 0.4.1 - 2026-11-27
+
+Joshua can run Python: the new `code-execution` builtin computes in a
+container with no network, so a number comes from code and not from a read of
+a file. An assignment session has no route to the open web any more, and the
+compose stack has a closed network for it. Long work in a workspace survives a
+session reset, with notes of 16000 characters, a handoff that names what is
+open, and the last three turns carried word for word. The chat screen is one
+list of threads with panels you can drag, a message you send while Joshua
+works joins the next turn, a half-written message is kept, and a path Joshua
+names becomes a link on every text channel. The Instance page says whether a
+newer release exists, Joshua writes the text of a pull request of a developer
+task, and a long list of first-run, sign-in, and viewer defects is fixed.
+
+### Upgrading from 0.4.0
+
+Your `joshua.yaml` from 0.4.0 loads as it is. Then:
+
+1. Take a database backup first. This release adds the column
+   `workspaces.last_activity_at`, and core upgrades the schema at start.
+   `make backup` writes one. Nothing is dropped.
+2. On a compose host, take the new `docker-compose.yml` and run `make up`. It
+   gains a top-level `networks:` block: `default`, which has a route to the
+   internet, and `closed`, with `internal: true`, which has none. The
+   `assignments` service is on `closed` alone, so a shell in an assignment
+   session reaches the other containers and no host on the open web, and
+   postgres, gateway, core, channels, and the viewer are on both networks. A
+   compose file of 0.4.0 has neither network and leaves the assignments
+   container with raw web egress. With a git host on the open web, add
+   `- default` to the `networks` list of the `assignments` service and allow
+   the addresses of that host alone in a firewall around the host. See
+   [assignments.md](assignments.md#what-the-session-can-reach).
+3. An instance that turned the code sandbox on renames it to code execution,
+   all at the same time as the upgrade: the config section `sandbox:` becomes
+   `code_execution:`, the `mcp:` entry `sandbox` becomes `code-execution`, the
+   environment variable `SANDBOX_TOKEN` becomes `CODE_EXECUTION_TOKEN`, the
+   chart values `sandbox.*` become `codeExecution.*` and `secrets.sandbox`
+   becomes `secrets.codeExecution`, and the Secret `joshua-sandbox-secrets`
+   becomes `joshua-code-execution-secrets`. An old `sandbox:` section fails
+   validation. See [code-execution.md](code-execution.md).
+
 ### Code execution
 
 - **Joshua can run Python.** The new `code-execution` builtin runs code in a
@@ -79,6 +120,22 @@ with the images and the packaged chart, are at
   beside the id the workspace holds, so the picker shows "sonnet", not
   `claude-sonnet-5`. "Default" is still the empty value, and a workspace with
   no model runs on the model of the chat job.
+- **The chat screen is one list of threads, with panels you can drag.** The
+  chat rail is gone. The threads stand under "Chat" in the sidebar: the normal
+  chat, then the workspaces with the newest activity, then "Show all", then
+  "New workspace". Each row keeps the shared mark, the work charm, and the
+  unread count, and an archived workspace shows after "Show all" with its own
+  mark. An item opens over the dimmed workspace: the focus stays inside it,
+  Escape and a click outside close it, there is a full-screen toggle and a
+  control that opens the item on its own page, and the conversation stays
+  behind it, so a close gives back the scroll position of the thread and the
+  text in the composer. The Items panel has a filter that matches the title
+  and the address, and a section header that folds. The divider beside each
+  panel is a drag handle, with the arrow keys and a double-click that resets
+  the width, and the width is kept per person, per panel, and per screen size.
+  A hardware keyboard sends on Enter, while a touch keyboard keeps the return
+  key for a new line. The thread stays at the bottom while an answer streams
+  in.
 
 ### Workspaces
 
