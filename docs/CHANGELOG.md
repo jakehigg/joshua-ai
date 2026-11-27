@@ -6,6 +6,15 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+- **An assignment session reaches no git host.** The git proxy is a container
+  of its own, `assignments-git-proxy` in compose and the `joshua-git-proxy`
+  pod in the chart: it is the one container with a route to the git hosts, and
+  the session container has none. A clone works as before, and the session
+  still holds no git token. The two containers share the secret of a session
+  through the new table `assignments.git_grant`, which holds a digest and
+  never the secret. `docs/assignments.md` and `docs/security.md` have the
+  shape.
+
 ## 0.4.3 - 2026-11-27
 
 A fix release. A restart of Joshua no longer answers the last iMessage a

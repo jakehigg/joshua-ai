@@ -17,9 +17,15 @@ secrets and the addresses:
 - ``CORE_URL``: where the runner reads the limits, writes the usage, and
   sends the model calls of a session (core's model forwarder).
 - ``GATEWAY_URL``: where a session reaches the MCP servers of its person.
+- ``GIT_PROXY_URL``: the git proxy, in its own container, such as
+  ``http://joshua-git-proxy:8003``. The runner writes it into the
+  ``.gitconfig`` of each session. Without it a session gets no
+  ``.gitconfig``, so it clones nothing.
 
-Each URL needs ``JOSHUA_TOKEN_ASSIGNMENTS``. The runner needs ``CORE_URL``
-and ``GATEWAY_URL``.
+``CHANNELS_URL``, ``CORE_URL``, and ``GATEWAY_URL`` each need
+``JOSHUA_TOKEN_ASSIGNMENTS``. The runner needs ``CORE_URL`` and
+``GATEWAY_URL``. The git proxy needs no fleet token: the secret of the
+session is the credential of a clone.
 
 Every error message names the variable that is wrong, and never a token.
 """
@@ -58,6 +64,7 @@ class Settings:
     fleet_token: str = field(default="", repr=False)
     core_url: str | None = None
     gateway_url: str | None = None
+    git_proxy_url: str | None = None
     # Fleet identity to token, for the read API. It never holds the token of
     # this container.
     read_tokens: Mapping[str, str] = field(default_factory=dict, repr=False)
@@ -144,6 +151,10 @@ def settings_from_env(cfg: JoshuaConfig, env: Mapping[str, str] | None = None) -
             raise SettingsError(f"{name} needs JOSHUA_TOKEN_ASSIGNMENTS")
         urls[name] = url
 
+    git_proxy_url = env.get("GIT_PROXY_URL", "").strip() or None
+    if git_proxy_url and not git_proxy_url.startswith(("http://", "https://")):
+        raise SettingsError("GIT_PROXY_URL must start with http:// or https://")
+
     read_tokens = {
         name: token.strip()
         for name, token in load_fleet_tokens(env).items()
@@ -167,5 +178,6 @@ def settings_from_env(cfg: JoshuaConfig, env: Mapping[str, str] | None = None) -
         fleet_token=fleet_token,
         core_url=urls["CORE_URL"],
         gateway_url=urls["GATEWAY_URL"],
+        git_proxy_url=git_proxy_url,
         read_tokens=read_tokens,
     )

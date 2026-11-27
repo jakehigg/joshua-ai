@@ -45,9 +45,10 @@ the run, unless the ``tools`` of the spec leave ``history`` out. The runner
 sends only who started the run; core applies the scope of each read (see
 ``history``).
 
-With a ``GitProxy``, each session gets a new secret for the proxy and a
-``.gitconfig`` in its ``HOME`` that sends every ``https://`` git URL there.
-The secret goes when the session stops. See ``git_proxy``.
+With ``GIT_PROXY_URL``, each session gets a new secret for the git proxy
+and a ``.gitconfig`` in its ``HOME`` that sends every ``https://`` git URL
+to that container. The secret goes when the session stops. See
+``git_proxy``.
 
 A failure gives the row a short label, never the error text.
 """
@@ -89,7 +90,12 @@ from joshua_assignments import (
 )
 from joshua_assignments.clock import Clock
 from joshua_assignments.core_client import CoreClient
-from joshua_assignments.git_proxy import GitProxy, git_config, write_git_config
+from joshua_assignments.git_proxy import (
+    git_config,
+    grant_secret,
+    revoke_secrets,
+    write_git_config,
+)
 from joshua_assignments.repos import RepoError, in_scope, normalize_repo
 from joshua_assignments.runner import RunnerHost
 from joshua_assignments.store import (
@@ -361,10 +367,8 @@ class SdkRunner:
         sleep: Callable[[float], Any] = asyncio.sleep,
         monotonic: Callable[[], float] = time.monotonic,
         watch_s: float = session.WATCH_S,
-        git: GitProxy | None = None,
     ) -> None:
         self.host = host
-        self.git = git
         self.core = core or CoreClient(host.settings)
         self.client_factory = client_factory
         self.work_root = work_root
@@ -383,15 +387,6 @@ class SdkRunner:
         self, assignment: dict[str, Any], text: str, *, reason: str = "answer"
     ) -> None:
         self._spawn(assignment["id"], reason=reason, answer=text or None)
-
-    async def open(self) -> None:
-        """Start the git proxy, when the runner has one."""
-        if self.git is not None:
-            await self.git.start()
-
-    async def close(self) -> None:
-        if self.git is not None:
-            await self.git.close()
 
     async def cancel(self, assignment: dict[str, Any]) -> None:
         """Stop the session of the assignment and remove its scratch directory."""
@@ -562,20 +557,20 @@ class SdkRunner:
         )
         return session.history_server(tools.handlers())
 
-    def _git_setup(self, row: dict[str, Any], home: Path) -> None:
+    async def _git_setup(self, row: dict[str, Any], home: Path) -> None:
         """Give the session a new proxy secret and its ``.gitconfig``. No proxy: no file."""
-        if self.git is None or self.git.port is None:
+        proxy_url = self.host.settings.git_proxy_url
+        if not proxy_url:
             return
-        secret = self.git.grant(row["id"])
+        secret = await grant_secret(self.host.store, row["id"])
         hosts = {repo.split("/", 1)[0] for repo in in_scope(row)}
-        write_git_config(home, git_config(self.git.port, secret, hosts))
+        write_git_config(home, git_config(proxy_url, secret, hosts))
 
     async def _work(self, assignment_id: int, reason: str | None, answer: str | None) -> None:
         try:
             await self._work_inner(assignment_id, reason, answer)
         finally:
-            if self.git is not None:
-                self.git.revoke(assignment_id)
+            await revoke_secrets(self.host.store, assignment_id)
 
     async def _work_inner(
         self, assignment_id: int, resume_reason: str | None, answer: str | None
@@ -604,7 +599,7 @@ class SdkRunner:
         config_dir = home / ".claude"
         config_dir.mkdir(parents=True, exist_ok=True)
         (work / prompts.REPOS_DIR).mkdir(exist_ok=True)
-        self._git_setup(row, home)
+        await self._git_setup(row, home)
         tools = AssignmentTools(assignment_id, self.host, self.sleep, self.core)
         server = session.assignment_server(tools.handlers())
         history_mcp = self._history(row)

@@ -723,16 +723,16 @@ that the session composes itself also goes past the grant rule of
 The network enforces it, not the prompt alone:
 
 - On Kubernetes, the network policy of the chart allows egress to gateway,
-  channels, core, the database, the cluster DNS, and the address ranges of
-  `assignments.networkPolicy.gitHosts.cidrs`. It names no other destination.
+  channels, core, the database, the cluster DNS, and the git proxy on 8003. It
+  names no other destination, and no address range of a git host.
 - With compose, the container is on the `closed` network, which has no route
   off the host.
 
-One route out stays. The git proxy of the manager fetches from the git host
-itself, and it runs in the same container as the session, so a command in the
-session can still reach those address ranges on port 443. The rule in the
-session prompt keeps research off that path, and closing it needs the proxy in
-a container of its own.
+A clone is the one fetch of an assignment, and the git proxy makes it, in a
+container of its own. It holds the read token of each git host, and it is the
+one container of the deployment with a route to those hosts; the container of
+the session has none. So a command in the session reaches no public host, the
+git hosts included.
 [assignments.md](assignments.md#what-the-session-can-reach) has the detail.
 
 ## Code execution
@@ -806,6 +806,9 @@ list makes it. Keep such servers on a short list.
   Joshua sends.
 - `assignments` is on the `closed` compose network, which has no route off the
   host. It reaches the other containers and nothing on the open web.
+- `assignments-git-proxy` is on `default` as well as `closed`: it is the one
+  container that reaches the git hosts. Only the assignments container reaches
+  it, with the secret of a running session.
 - `code-execution` is on the `code-execution` compose network alone, which has no route off
   the host and holds only the gateway. It reaches nothing.
 

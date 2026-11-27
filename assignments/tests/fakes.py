@@ -21,6 +21,8 @@ class FakeStore:
         self.saved: dict[int, dict[str, Any]] = {}
         self._next_saved = 1
         self.comment_rows: dict[int, dict[str, Any]] = {}
+        # The SHA-256 of each session secret of the git proxy, to its assignment.
+        self.git_grants: dict[str, int] = {}
         self._next_comment = 1
         self.opened = False
         self.closed = False
@@ -174,6 +176,18 @@ class FakeStore:
         row = self.rows.get(assignment_id)
         if row is not None:
             row.update(report=markdown, report_at=self.clock())
+
+    async def put_git_grant(self, assignment_id: int, secret_sha256: str) -> None:
+        await self.clear_git_grants(assignment_id)
+        self.git_grants[secret_sha256] = int(assignment_id)
+
+    async def clear_git_grants(self, assignment_id: int) -> None:
+        for digest, owner in list(self.git_grants.items()):
+            if owner == assignment_id:
+                del self.git_grants[digest]
+
+    async def git_grant_owner(self, secret_sha256: str) -> int | None:
+        return self.git_grants.get(secret_sha256)
 
     def _with_runs(self, saved: dict[str, Any]) -> dict[str, Any]:
         runs = [

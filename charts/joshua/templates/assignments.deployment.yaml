@@ -55,6 +55,13 @@ spec:
               value: http://joshua-core:8000
             - name: GATEWAY_URL
               value: http://joshua-gateway:8000
+            {{- if .Values.gitProxy.enabled }}
+            {{/* The git proxy, in its own pod. The runner writes this address
+                 into the .gitconfig of each session, with a secret for that
+                 session. Without it a session clones nothing. */}}
+            - name: GIT_PROXY_URL
+              value: http://joshua-git-proxy:8003
+            {{- end }}
             {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.assignments) | nindent 12 }}
           resources:
             {{- toYaml .Values.assignments.resources | nindent 12 }}
@@ -109,17 +116,15 @@ spec:
 ---
 {{/* Only the gateway reaches the container, and the viewer when it is on (the
      read API). The container reaches gateway, channels, core (the model
-     forwarder), the database, the cluster DNS, and the address ranges of the
-     git hosts, and nothing else: no model server and no other host on the
-     internet. A session holds private data, so it gets no route to the open
-     web.
+     forwarder), the database, the cluster DNS, and the git proxy, and nothing
+     else: no git host, no model server, and no other host on the internet. A
+     session holds private data and a shell, so this pod has no route off the
+     cluster at all.
 
-     The git-host ranges belong to the git proxy of the manager, which fetches
-     from the host itself (see assignments/joshua_assignments/git_proxy.py).
-     They are the one route out of this pod. The proxy runs in the same
-     container as the session, so a shell in the session can still reach those
-     ranges on 443; the rule in the session prompt, not this policy, keeps
-     research off that path. */}}
+     A clone goes to the git proxy, which runs in its own pod and holds the
+     address ranges of the git hosts in its own policy (git-proxy.yaml). The
+     secret of the session opens that listener, and nothing in this pod can
+     reach a git host without it. */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -191,18 +196,15 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-    {{- if $np.gitHosts.cidrs }}
-    {{/* The one route out of the pod, for the git proxy of the manager. */}}
+    {{- if .Values.gitProxy.enabled }}
+    {{/* A clone of a granted repository, with the secret of the session. */}}
     - to:
-        {{- range $np.gitHosts.cidrs }}
-        - ipBlock:
-            cidr: {{ . }}
-        {{- end }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: joshua-git-proxy
       ports:
-        {{- range $np.gitHosts.ports }}
         - protocol: TCP
-          port: {{ . }}
-        {{- end }}
+          port: 8003
     {{- end }}
 {{- end }}
 {{- end }}

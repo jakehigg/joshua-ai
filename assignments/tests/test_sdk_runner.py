@@ -101,7 +101,9 @@ def spec(**fields):
 class Harness:
     def __init__(self, tmp_path: Path, sdk: FakeSdk, core: FakeCore, *, extra: str = "", **kw):
         self.cfg = make_config(text=CONFIG + extra)
-        self.settings = make_settings()
+        # With a URL, the runner writes the .gitconfig of each session and
+        # grants it a secret of the git proxy in the store.
+        self.settings = make_settings(git_proxy_url=kw.pop("git_proxy_url", None))
         self.core = core
         self.sdk = sdk
         self.work = tmp_path / "work"

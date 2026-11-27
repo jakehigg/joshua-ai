@@ -10,13 +10,14 @@
 # Secrets come only from `.env` (see `.env.example`). No secret is written in
 # this file; every value is a literal or a `${VAR}` from `.env`.
 #
-# Network: two networks, at the bottom of this file. `default` has a route to
+# Network: three networks, at the bottom of this file. `default` has a route to
 # the internet, which `core` (Anthropic API, SDK web tools), `gateway` (MCP
-# upstreams) and `channels` (Telegram, BlueBubbles) need. `closed` has none
-# (`internal: true`), and the assignments container is on it alone, so a shell
-# in an assignment session reaches the other containers and no host on the open
-# web. Egress to one destination alone is the job of a firewall around the
-# host, which compose cannot express.
+# upstreams), `channels` (Telegram, BlueBubbles) and `assignments-git-proxy`
+# (the git hosts) need. `closed` has none (`internal: true`), and the
+# assignments container is on it alone, so a shell in an assignment session
+# reaches the other containers and no host on the open web: a clone goes to the
+# git proxy, which is a container of its own. Egress to one destination alone is
+# the job of a firewall around the host, which compose cannot express.
 
 # All three app containers hold every fleet token, because each one verifies
 # the callers it trusts (see CLAUDE.md, "Identity and auth"). `make init-env`
@@ -269,27 +270,19 @@ services:
       # manager checks it on the read API (assignments.read_callers). It is
       # never a bearer of /mcp.
       JOSHUA_TOKEN_VIEWER: ${JOSHUA_TOKEN_VIEWER:-}
-    # The read token of each git host, under the name that
-    # assignments.platforms.<host>.token_env gives. Only the manager reads it;
-    # a session clones through the manager and never sees it.
-    env_file:
-      - path: .env.assignments
-        required: false
+      # The git proxy, in its own container. The runner writes this address
+      # into the .gitconfig of each session, with a secret for that session.
+      GIT_PROXY_URL: http://assignments-git-proxy:8003
     volumes:
       - *config-mount
       - data:/data:ro
       # The scratch directory of each assignment.
       - assignments-work:/work
-    # The `closed` network alone: no route to the open web. A session holds
-    # private data — the wiki, the documents of the person, a granted
-    # repository — so it reaches the other containers and nothing else. Its
-    # research goes to the `internet` MCP server through the gateway.
-    #
-    # The git proxy of the manager fetches from a git host itself, and it runs
-    # in this container. To clone from a git host on the open web, add
-    # `- default` to this list, and allow the addresses of that host alone in a
-    # firewall around the host: compose cannot narrow a network to one
-    # destination. Then a shell in a session can reach the open web again.
+    # The `closed` network alone: no route to the open web, and none to a git
+    # host. A session holds private data — the wiki, the documents of the
+    # person, a granted repository — so it reaches the other containers of the
+    # stack and nothing else. Its research goes to the `internet` MCP server
+    # through the gateway, and its clone to the git proxy below.
     networks: [closed]
     depends_on:
       postgres:
@@ -297,6 +290,50 @@ services:
       channels:
         condition: service_healthy
     healthcheck: *app-healthcheck
+
+  # The git proxy: the read-only git server of the sessions, in a container of
+  # its own. It starts with the `assignments` profile, and it is the
+  # assignments image with another entry point.
+  #
+  # It is the one container of the stack that reaches a git host, so it is on
+  # `default` as well as `closed`. The assignments container is on `closed`
+  # alone, which is why the proxy cannot run beside the session: a container
+  # with a route to a git host gives its shell that route too.
+  #
+  # It holds the read token of each git host, under the name that
+  # assignments.platforms.<host>.token_env gives, and the database. It holds no
+  # fleet token: the secret of a running session, which the manager writes into
+  # the .gitconfig of that session, is what opens the listener.
+  assignments-git-proxy:
+    image: ghcr.io/jakehigg/joshua-ai-assignments:${JOSHUA_VERSION:-0.4.3}
+    profiles: ["assignments"]
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "joshua_assignments.git_proxy"]
+    environment:
+      <<: *runtime-vars
+      JOSHUA_CONFIG: /etc/joshua/joshua.yaml
+      # The grant of a running session and the row of its assignment, in the
+      # schema `assignments` that the manager owns.
+      DATABASE_URL: postgresql://joshua:${POSTGRES_PASSWORD:-}@postgres:5432/joshua
+    # The read token of each git host. The same file as the manager's, so one
+    # file holds the tokens of an installation; only this container reads the
+    # git tokens from it.
+    env_file:
+      - path: .env.assignments
+        required: false
+    volumes:
+      - *config-mount
+    networks: [default, closed]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/healthz')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
 
   # Code execution: the stock Jupyter scipy image, which runs Python for the
   # `code-execution` builtin of the gateway. Off by default; `make up` starts it when
@@ -371,9 +408,11 @@ networks:
   default:
   # No route off the host: `internal: true` gives the network no gateway, so a
   # container on this network alone reaches the other containers and nothing
-  # beyond them. Every container that talks to the assignments container is on
-  # it: the gateway calls `/mcp`, the viewer calls the read API, and the
-  # manager calls core, channels, and postgres.
+  # beyond them. Docker's resolver still answers, so a name of the stack
+  # resolves and a public name does not. Every container that talks to the
+  # assignments container is on it: the gateway calls `/mcp`, the viewer calls
+  # the read API, and the manager calls core, channels, postgres, and the git
+  # proxy.
   closed:
     internal: true
   # No route off the host, and two containers only: the gateway, which
