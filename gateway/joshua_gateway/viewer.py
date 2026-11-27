@@ -400,12 +400,17 @@ def startup_warnings(cfg: config.JoshuaConfig, env: Mapping[str, str]) -> list[d
             }
         )
     if isinstance(cfg.viewer.anonymous, str):
+        # With the anonymous method, false alone leaves a viewer nobody can
+        # read, so the line also names the method to set.
+        if cfg.viewer.auth.method == "anonymous":
+            fix = "set viewer.auth.method: pin (or password) and viewer.anonymous: false"
+        else:
+            fix = "set viewer.anonymous: false"
         lines.append(
             {
                 "message": (
                     "viewer.anonymous names a person, so every request with no cookie is "
-                    "served as that person, with their role: set viewer.anonymous: false to "
-                    "ask for a sign-in"
+                    f"served as that person, with their role: {fix} to ask for a sign-in"
                 ),
                 "setting": "viewer.anonymous",
                 "person": cfg.viewer.anonymous,

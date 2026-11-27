@@ -78,6 +78,22 @@ def _passwords_from_env() -> dict[str, str]:
     return out
 
 
+def _env_ids() -> set[str]:
+    """The person ids that ``VIEWER_PASSWORDS`` and ``VIEWER_PW_<ID>`` name.
+
+    ``VIEWER_PW_<ID>`` is read back to an id the way ``password_reference``
+    builds the name: lower case, with ``_`` for ``-``. A variable with an
+    empty value names nobody.
+    """
+    ids = set(_passwords_from_env())
+    for name, value in os.environ.items():
+        if name.startswith(VIEWER_PW_PREFIX) and value.strip():
+            person_id = name[len(VIEWER_PW_PREFIX) :].lower().replace("_", "-")
+            if person_id:
+                ids.add(person_id)
+    return ids
+
+
 def password_reference(settings: JoshuaConfig, person_id: str) -> str:
     """The password reference of ``person_id``, or "" when there is none.
 
@@ -154,6 +170,19 @@ async def import_once(repo: Repo, settings: JoshuaConfig) -> dict[str, Any]:
                 await repo.set_auth_secret(person_id, secret_hash, conn=conn)
                 imported.append(person_id)
                 logger.info({"message": "auth import imported", "person": person_id})
+            # The old viewer let only the ids of ``viewer.users`` sign in, so
+            # an id that only the environment names gets no secret. Name each
+            # one, because a run that skips it in silence looks like a run
+            # that found nothing.
+            for person_id in sorted(_env_ids() - set(settings.viewer.users)):
+                skipped.append(person_id)
+                logger.info(
+                    {
+                        "message": "auth import skipped",
+                        "person": person_id,
+                        "why": "not in viewer.users",
+                    }
+                )
             if imported:
                 await repo.set_auth_import_marker(len(imported), conn=conn)
     except Exception as exc:  # noqa: BLE001 — the import never stops core

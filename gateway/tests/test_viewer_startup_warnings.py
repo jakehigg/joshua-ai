@@ -75,5 +75,18 @@ def test_an_anonymous_person_id_is_logged() -> None:
     assert "role" in str(lines[0]["message"])
 
 
+def test_the_anonymous_person_fix_names_the_method_when_it_must() -> None:
+    """Under the anonymous method, ``viewer.anonymous: false`` alone gives a
+    viewer nobody can read, so the line also says to set a method that asks
+    for a secret. Under pin it says only to turn the setting off."""
+    anon = _messages(_cfg("viewer:\n  enabled: true\n  anonymous: alex\n"), ENV)
+    assert "viewer.auth.method: pin (or password) and viewer.anonymous: false" in anon[0]
+    pin = _messages(
+        _cfg("viewer:\n  enabled: true\n  anonymous: alex\n  auth:\n    method: pin\n"), ENV
+    )
+    assert "viewer.auth.method" not in pin[0]
+    assert "set viewer.anonymous: false to ask for a sign-in" in pin[0]
+
+
 def test_a_viewer_with_a_sign_in_and_a_key_says_nothing() -> None:
     assert _messages(_cfg("viewer:\n  enabled: true\n  auth:\n    method: pin\n"), ENV) == []
