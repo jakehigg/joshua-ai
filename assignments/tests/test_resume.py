@@ -273,12 +273,16 @@ async def test_a_session_clones_through_the_proxy_and_never_holds_the_token(
     from conftest import make_config
     from test_sdk_runner import CONFIG
 
+    # The proxy is another process, so the test starts it beside the runner and
+    # gives the runner only its address.
     git = GitProxy(
         store,
         lambda: make_config(text=CONFIG + GIT_EXTRA),
+        port=0,
         environ=environ,
         transport=httpx.MockTransport(host.handler),
     )
+    port = await git.start()
     seen: dict = {}
 
     async def run_git(options, *args: str, cwd: str | None = None) -> int:
@@ -317,13 +321,21 @@ async def test_a_session_clones_through_the_proxy_and_never_holds_the_token(
         return {}
 
     sdk = FakeSdk([init(), shell(clone), shell(push), *done("ok"), result()])
-    h = Harness(tmp_path, sdk, FakeCore(), store=store, extra=GIT_EXTRA, git=git)
+    h = Harness(
+        tmp_path,
+        sdk,
+        FakeCore(),
+        store=store,
+        extra=GIT_EXTRA,
+        git_proxy_url=f"http://127.0.0.1:{port}",
+    )
     h.runner.environ = environ
     await h.manager.open()
     try:
         started = await h.start(repos=["gitlab.example.net/infra/gitops"])
     finally:
         await h.manager.close()
+        await git.close()
 
     assert seen["clone"] == 0, seen["out"]
     # The clone had the full history, read inside the session.
@@ -346,7 +358,7 @@ async def test_a_session_clones_through_the_proxy_and_never_holds_the_token(
     # The token is in no log line.
     assert TOKEN not in "\n".join(f"{r.getMessage()} {r.args}" for r in caplog.records)
     # The secret of the session is gone with the session.
-    assert git.owner("Bearer " + gitconfig.split("Bearer ", 1)[1].split()[0]) is None
+    assert await git.owner("Bearer " + gitconfig.split("Bearer ", 1)[1].split()[0]) is None
 
 
 def options_env_has_no(env: dict[str, str], value: str) -> bool:

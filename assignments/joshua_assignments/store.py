@@ -6,8 +6,8 @@ additive only: a release never removes a table or a column. The schema keeps
 the tables of this container apart from the tables of core in the same
 database.
 
-``Store`` is the protocol the manager uses. ``PgStore`` is the Postgres
-store. It takes a connection from a pool for each operation, as core does,
+``Store`` is the protocol the manager and the git proxy use. ``PgStore`` is
+the Postgres store. It takes a connection from a pool for each operation, as core does,
 so two operations never share a connection. A cancelled caller does not stop
 an operation: the operation runs to its end in a task of its own and gives
 its connection back clean. Every method is safe to call concurrently.
@@ -226,6 +226,19 @@ CREATE TABLE IF NOT EXISTS assignments.checkpoint (
 CREATE INDEX IF NOT EXISTS idx_checkpoint_assignment
     ON assignments.checkpoint (assignment_id, id DESC);
 
+-- The secret of the session of a running assignment, for the git proxy. The
+-- runner writes one row when a session starts and removes it when the session
+-- stops; the proxy, in its own container, reads it. The column holds the
+-- SHA-256 of the secret, in hex, so the secret itself is in the database of
+-- neither process. A row of an assignment that is gone goes with it.
+CREATE TABLE IF NOT EXISTS assignments.git_grant (
+    secret_sha256 TEXT PRIMARY KEY,
+    assignment_id BIGINT NOT NULL REFERENCES assignments.assignment(id) ON DELETE CASCADE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_git_grant_assignment
+    ON assignments.git_grant (assignment_id);
+
 -- One row for each slice of model turns.
 CREATE TABLE IF NOT EXISTS assignments.slice (
     id            BIGSERIAL PRIMARY KEY,
@@ -345,6 +358,12 @@ class Store(Protocol):
     async def add_output(self, assignment_id: int, kind: str, ref: str, title: str) -> int: ...
 
     async def write_report(self, assignment_id: int, markdown: str) -> None: ...
+
+    async def put_git_grant(self, assignment_id: int, secret_sha256: str) -> None: ...
+
+    async def clear_git_grants(self, assignment_id: int) -> None: ...
+
+    async def git_grant_owner(self, secret_sha256: str) -> int | None: ...
 
     async def put_saved(
         self, person_id: str, name: str, spec: dict[str, Any]
@@ -491,17 +510,30 @@ def shielded[**P, R](
 
 
 class PgStore:
-    """The store in the shared Postgres, through an async connection pool."""
+    """The store in the shared Postgres, through an async connection pool.
 
-    def __init__(self, database_url: str, *, min_size: int = 1, max_size: int = 5) -> None:
+    ``apply_schema`` False opens the pool and leaves the schema alone, for a
+    second process on the same database: the manager owns the schema, and the
+    git proxy only reads a grant.
+    """
+
+    def __init__(
+        self,
+        database_url: str,
+        *,
+        min_size: int = 1,
+        max_size: int = 5,
+        apply_schema: bool = True,
+    ) -> None:
         self._url = database_url
         self._min_size = min_size
         self._max_size = max_size
+        self._apply_schema = apply_schema
         self.pool: AsyncConnectionPool | None = None
         self._running: set[asyncio.Task[Any]] = set()
 
     async def open(self) -> None:
-        """Open the pool and apply the schema."""
+        """Open the pool and, unless ``apply_schema`` is False, apply the schema."""
         self.pool = AsyncConnectionPool(
             self._url,
             min_size=self._min_size,
@@ -510,6 +542,8 @@ class PgStore:
             kwargs={"row_factory": dict_row, "autocommit": True},
         )
         await self.pool.open(wait=True, timeout=30)
+        if not self._apply_schema:
+            return
         async with self.pool.connection() as conn:
             await conn.execute(SCHEMA_SQL)
         logger.info({"message": "assignments schema verified"})
@@ -756,6 +790,43 @@ class PgStore:
                 "UPDATE assignments.assignment SET report = %s, report_at = now() WHERE id = %s",
                 (markdown, assignment_id),
             )
+
+    @shielded
+    async def put_git_grant(self, assignment_id: int, secret_sha256: str) -> None:
+        """Store the secret of the session of an assignment. It replaces an older one.
+
+        ``secret_sha256`` is the SHA-256 of the secret, in hex; the secret
+        itself is never stored (see ``git_proxy``).
+        """
+        async with self._pool().connection() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "DELETE FROM assignments.git_grant WHERE assignment_id = %s", (assignment_id,)
+                )
+                await conn.execute(
+                    "INSERT INTO assignments.git_grant (secret_sha256, assignment_id) "
+                    "VALUES (%s, %s)",
+                    (secret_sha256, assignment_id),
+                )
+
+    @shielded
+    async def clear_git_grants(self, assignment_id: int) -> None:
+        """Remove every secret of an assignment. The session can then clone nothing."""
+        async with self._pool().connection() as conn:
+            await conn.execute(
+                "DELETE FROM assignments.git_grant WHERE assignment_id = %s", (assignment_id,)
+            )
+
+    @shielded
+    async def git_grant_owner(self, secret_sha256: str) -> int | None:
+        """The assignment of a stored secret, or None."""
+        async with self._pool().connection() as conn:
+            cur = await conn.execute(
+                "SELECT assignment_id FROM assignments.git_grant WHERE secret_sha256 = %s",
+                (secret_sha256,),
+            )
+            row = await cur.fetchone()
+        return int(row["assignment_id"]) if row else None
 
     @shielded
     async def put_saved(self, person_id: str, name: str, spec: dict[str, Any]) -> dict[str, Any]:

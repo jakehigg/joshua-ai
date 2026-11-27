@@ -508,6 +508,29 @@ async def test_the_request_the_grants_and_the_inbox_are_stored(store) -> None:
     assert (await store.get(row["id"]))["inbox"] is None
 
 
+async def test_a_git_grant_is_found_by_its_digest_and_a_new_one_replaces_it(store) -> None:
+    row = await create(store)
+    other = await create(store, "mia")
+    await store.put_git_grant(row["id"], "a" * 64)
+    await store.put_git_grant(other["id"], "b" * 64)
+    assert await store.git_grant_owner("a" * 64) == row["id"]
+    assert await store.git_grant_owner("b" * 64) == other["id"]
+    # A new session of the same assignment forgets the secret of the old one.
+    await store.put_git_grant(row["id"], "c" * 64)
+    assert await store.git_grant_owner("a" * 64) is None
+    assert await store.git_grant_owner("c" * 64) == row["id"]
+    await store.clear_git_grants(row["id"])
+    assert await store.git_grant_owner("c" * 64) is None
+    assert await store.git_grant_owner("b" * 64) == other["id"]
+    # The proxy reads the table without applying the schema.
+    reader = PgStore(os.environ["DATABASE_URL"], apply_schema=False)
+    await reader.open()
+    try:
+        assert await reader.git_grant_owner("b" * 64) == other["id"]
+    finally:
+        await reader.close()
+
+
 async def test_the_lineage_of_a_run_and_its_reruns(store) -> None:
     root = await create(store)
     second = await store.create(

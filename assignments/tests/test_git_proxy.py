@@ -3,7 +3,8 @@
 A fake git host serves a local bare repository over smart HTTP: it runs
 ``git upload-pack --stateless-rpc`` for each request. It sits behind an
 ``httpx.MockTransport``, so no network is used. The real ``git`` binary
-clones through the proxy on ``127.0.0.1``.
+clones through the proxy, which listens on a free port of this host; in a
+deployment it listens on the fixed port of its own container.
 """
 
 from __future__ import annotations
@@ -23,9 +24,13 @@ import pytest
 from conftest import make_config
 from fakes import FakeStore
 from joshua_assignments.git_proxy import (
+    LISTEN_HOST,
+    LISTEN_PORT,
     PUSH_REFUSED,
     GitProxy,
     git_config,
+    grant_secret,
+    revoke_secrets,
     split_path,
     write_git_config,
 )
@@ -152,6 +157,8 @@ class Setup:
         self.proxy = GitProxy(
             self.store,
             lambda: self.cfg,
+            # A free port: the test runs beside whatever else uses this host.
+            port=0,
             environ=environ if environ is not None else {"ASSIGNMENTS_GITLAB_TOKEN": TOKEN},
             transport=httpx.MockTransport(self.host.handler),
         )
@@ -173,11 +180,13 @@ class Setup:
             "GIT_CONFIG_NOSYSTEM": "1",
         }
 
-    def configure(self, assignment_id: int, hosts: tuple[str, ...] = ()) -> str:
-        assert self.proxy.port is not None
-        secret = self.proxy.grant(assignment_id)
-        write_git_config(self.home, git_config(self.proxy.port, secret, hosts))
+    async def configure(self, assignment_id: int, hosts: tuple[str, ...] = ()) -> str:
+        secret = await grant_secret(self.store, assignment_id)
+        write_git_config(self.home, git_config(self.base(), secret, hosts))
         return secret
+
+    def base(self) -> str:
+        return f"http://127.0.0.1:{self.proxy.port}"
 
     async def git(self, *args: str, cwd: Path | None = None) -> tuple[int, str]:
         proc = await asyncio.create_subprocess_exec(
@@ -192,7 +201,10 @@ class Setup:
         return proc.returncode or 0, out.decode()
 
     def url(self, path: str) -> str:
-        return f"http://127.0.0.1:{self.proxy.port}/{path}"
+        return f"{self.base()}/{path}"
+
+    async def auth(self, assignment_id: int) -> dict[str, str]:
+        return {"Authorization": f"Bearer {await grant_secret(self.store, assignment_id)}"}
 
 
 def files_under(root: Path) -> list[Path]:
@@ -203,7 +215,7 @@ async def test_a_clone_through_the_proxy_has_the_full_history(tmp_path, caplog) 
     caplog.set_level(logging.DEBUG)
     async with Setup(tmp_path) as s:
         row = await running_row(s.store, [REPO])
-        secret = s.configure(row["id"])
+        secret = await s.configure(row["id"])
         dest = tmp_path / "work" / "repos" / "gitops"
         rc, out = await s.git("clone", f"https://{REPO}", str(dest))
         assert rc == 0, out
@@ -231,7 +243,7 @@ async def test_a_clone_through_the_proxy_has_the_full_history(tmp_path, caplog) 
 async def test_a_push_is_refused_and_never_reaches_the_host(tmp_path) -> None:
     async with Setup(tmp_path) as s:
         row = await running_row(s.store, [REPO])
-        s.configure(row["id"])
+        await s.configure(row["id"])
         dest = tmp_path / "clone"
         rc, out = await s.git("clone", f"https://{REPO}", str(dest))
         assert rc == 0, out
@@ -251,7 +263,7 @@ async def test_a_push_is_refused_and_never_reaches_the_host(tmp_path) -> None:
 async def test_an_ssh_url_of_the_host_goes_through_the_proxy(tmp_path) -> None:
     async with Setup(tmp_path) as s:
         row = await running_row(s.store, [REPO])
-        s.configure(row["id"], hosts=("gitlab.example.net",))
+        await s.configure(row["id"], hosts=("gitlab.example.net",))
         rc, out = await s.git(
             "clone", "git@gitlab.example.net:infra/gitops.git", str(tmp_path / "c")
         )
@@ -261,7 +273,7 @@ async def test_an_ssh_url_of_the_host_goes_through_the_proxy(tmp_path) -> None:
 async def test_a_repository_outside_the_spec_or_the_allowlist_is_refused(tmp_path) -> None:
     async with Setup(tmp_path) as s:
         row = await running_row(s.store, [REPO, "gitlab.example.net/other/x"])
-        s.configure(row["id"])
+        await s.configure(row["id"])
         # In assignments.repos, not in the spec.
         rc, out = await s.git(
             "clone", "https://gitlab.example.net/infra/secret", str(tmp_path / "a")
@@ -276,7 +288,7 @@ async def test_a_repository_outside_the_spec_or_the_allowlist_is_refused(tmp_pat
 async def test_a_granted_repo_is_admitted_and_an_ungranted_one_is_refused(tmp_path) -> None:
     async with Setup(tmp_path) as s:
         row = await running_row(s.store, [])
-        s.configure(row["id"])
+        await s.configure(row["id"])
         rc, out = await s.git("clone", f"https://{REPO}", str(tmp_path / "a"))
         assert rc != 0 and "request_resource" in out
         assert s.host.requests == []
@@ -298,7 +310,7 @@ async def test_a_granted_repo_is_admitted_and_an_ungranted_one_is_refused(tmp_pa
 async def test_a_wrong_or_revoked_secret_and_a_parked_assignment_get_403(tmp_path) -> None:
     async with Setup(tmp_path) as s:
         row = await running_row(s.store, [REPO])
-        secret = s.proxy.grant(row["id"])
+        secret = await grant_secret(s.store, row["id"])
         refs = s.url(f"{REPO}/info/refs?service=git-upload-pack")
         async with httpx.AsyncClient() as client:
             ok = await client.get(refs, headers={"Authorization": f"Bearer {secret}"})
@@ -308,7 +320,7 @@ async def test_a_wrong_or_revoked_secret_and_a_parked_assignment_get_403(tmp_pat
             await s.store.update(row["id"], status="waiting")
             parked = await client.get(refs, headers={"Authorization": f"Bearer {secret}"})
             await s.store.update(row["id"], status="running")
-            s.proxy.revoke(row["id"])
+            await revoke_secrets(s.store, row["id"])
             revoked = await client.get(refs, headers={"Authorization": f"Bearer {secret}"})
     for reply in (wrong, missing, parked, revoked):
         assert reply.status_code == 403
@@ -318,7 +330,7 @@ async def test_a_wrong_or_revoked_secret_and_a_parked_assignment_get_403(tmp_pat
 async def test_only_the_two_requests_of_a_fetch_are_forwarded(tmp_path) -> None:
     async with Setup(tmp_path) as s:
         row = await running_row(s.store, [REPO])
-        auth = {"Authorization": f"Bearer {s.proxy.grant(row['id'])}"}
+        auth = await s.auth(row["id"])
         async with httpx.AsyncClient() as client:
             receive = await client.get(
                 s.url(f"{REPO}/info/refs?service=git-receive-pack"), headers=auth
@@ -342,7 +354,7 @@ async def test_a_missing_token_is_refused_and_a_host_with_no_platform_gets_no_cr
 ) -> None:
     async with Setup(tmp_path, environ={}) as s:
         row = await running_row(s.store, [REPO, "public.example.org/open/x"])
-        auth = {"Authorization": f"Bearer {s.proxy.grant(row['id'])}"}
+        auth = await s.auth(row["id"])
         s.host.expect_auth = None
         async with httpx.AsyncClient() as client:
             missing = await client.get(
@@ -364,7 +376,7 @@ async def test_a_refusal_of_the_host_never_asks_git_for_a_password(
 ) -> None:
     async with Setup(tmp_path) as s:
         row = await running_row(s.store, [REPO])
-        auth = {"Authorization": f"Bearer {s.proxy.grant(row['id'])}"}
+        auth = await s.auth(row["id"])
         s.host.status = upstream
         async with httpx.AsyncClient() as client:
             reply = await client.get(
@@ -382,7 +394,7 @@ async def test_a_host_that_does_not_answer_is_502(tmp_path) -> None:
         await s.proxy.close()
         await s.proxy.start()
         row = await running_row(s.store, [REPO])
-        auth = {"Authorization": f"Bearer {s.proxy.grant(row['id'])}"}
+        auth = await s.auth(row["id"])
         async with httpx.AsyncClient() as client:
             reply = await client.get(
                 s.url(f"{REPO}/info/refs?service=git-upload-pack"), headers=auth
@@ -394,11 +406,17 @@ def test_split_path_and_the_git_config() -> None:
     assert split_path("/h.example/a/b.git/info/refs") == ("h.example/a/b.git", "info/refs")
     assert split_path("/h.example/a/b/git-upload-pack") == ("h.example/a/b", "git-upload-pack")
     assert split_path("/h.example/a/b/HEAD") is None
-    text = git_config(4321, "s3cret", ["gitlab.example.net"])
-    assert '[url "http://127.0.0.1:4321/"]\n\tinsteadOf = https://' in text
+    text = git_config("http://joshua-git-proxy:8003", "s3cret", ["gitlab.example.net"])
+    assert '[url "http://joshua-git-proxy:8003/"]\n\tinsteadOf = https://' in text
     assert "insteadOf = git@gitlab.example.net:" in text
     assert "extraHeader = Authorization: Bearer s3cret" in text
     assert "helper =" in text
+    # A URL with a trailing slash gives the same file.
+    assert git_config("http://joshua-git-proxy:8003/", "s3cret") == git_config(
+        "http://joshua-git-proxy:8003", "s3cret"
+    )
+    # The proxy is a container of its own, on a port that the git config names.
+    assert (LISTEN_HOST, LISTEN_PORT) == ("0.0.0.0", 8003)
 
 
 def test_the_git_config_file_is_for_its_owner_only(tmp_path) -> None:
@@ -407,11 +425,17 @@ def test_the_git_config_file_is_for_its_owner_only(tmp_path) -> None:
     assert path.stat().st_mode & 0o777 == 0o600
 
 
-def test_a_new_grant_replaces_the_old_secret() -> None:
-    proxy = GitProxy(FakeStore(), lambda: make_config(EXTRA, text=CONFIG), environ={})
-    first = proxy.grant(1)
-    second = proxy.grant(1)
+async def test_a_new_grant_replaces_the_old_secret_and_the_store_holds_no_secret() -> None:
+    store = FakeStore()
+    proxy = GitProxy(store, lambda: make_config(EXTRA, text=CONFIG), environ={})
+    first = await grant_secret(store, 1)
+    second = await grant_secret(store, 1)
     assert first != second
-    assert proxy.owner(f"Bearer {first}") is None
-    assert proxy.owner(f"Bearer {second}") == 1
-    assert proxy.owner("Basic x") is None
+    assert await proxy.owner(f"Bearer {first}") is None
+    assert await proxy.owner(f"Bearer {second}") == 1
+    assert await proxy.owner("Basic x") is None
+    assert await proxy.owner(None) is None
+    # The store holds the SHA-256 of the secret, never the secret itself.
+    assert first not in store.git_grants and second not in store.git_grants
+    await revoke_secrets(store, 1)
+    assert await proxy.owner(f"Bearer {second}") is None
