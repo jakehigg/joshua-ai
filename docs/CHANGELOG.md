@@ -6,6 +6,25 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+## 0.4.2 - 2026-11-27
+
+A fix release for the first installation of the viewer. The import of the old
+viewer passwords names each id it skips, a refused write of the viewer logs
+why, the warning for an open viewer gives a fix that works, and the docs say
+how to run a second checkout on one host and what a reverse proxy must send.
+
+### Upgrading from 0.4.1
+
+Your `joshua.yaml` and your `.env` from 0.4.1 load as they are. This release
+has no schema change and no config change. Put `JOSHUA_VERSION=0.4.2` in
+`.env`, then run `make pull && make up`. On Kubernetes, install the chart at
+0.4.2.
+
+Behind nginx, check that the `location` of the viewer sends the `Host` of the
+browser (`proxy_set_header Host $host;`). Without it, every write of the
+viewer is refused, the sign-in too. See "The viewer" in
+[operations.md](operations.md#the-viewer).
+
 ### Fixes
 
 - **The import of the old viewer passwords names each id it skips.** The
