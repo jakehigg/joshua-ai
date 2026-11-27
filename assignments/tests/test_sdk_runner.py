@@ -69,8 +69,7 @@ mcp:
     allow:
       - alex
   internet:
-    type: http
-    url: http://upstream.example/internet
+    kind: builtin
     allow:
       - alex
 assignments:

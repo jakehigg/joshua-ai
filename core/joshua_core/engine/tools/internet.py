@@ -9,6 +9,10 @@ private network.
 
 What comes back is content from the open web. It is wrapped and marked as
 such, and the agent reads it for the person.
+
+``lookup`` is the lookup itself, without a conversation of the agent around
+it. ``internet_api`` calls it for the ``internet`` builtin of the gateway, so
+an assignment session reads the open web through the same gate.
 """
 
 from __future__ import annotations
@@ -88,14 +92,43 @@ async def do_lookup(
     grants: UrlGrants | None = None,
     searcher: internet_agent.Searcher | None = None,
 ) -> str:
-    """Look one question up and return the text the agent reads.
+    """Look one question up for the conversation of ``deps``. See :func:`lookup`."""
+    return await lookup(
+        repo=deps.repo,
+        person_id=deps.person_id,
+        conversation_id=getattr(deps.conversation, "id", "") or "",
+        settings=settings,
+        question=question,
+        urls=urls,
+        grants=grants,
+        searcher=searcher,
+    )
+
+
+async def lookup(
+    *,
+    repo: Any,
+    person_id: str | None,
+    conversation_id: str,
+    settings: JoshuaConfig,
+    question: str,
+    urls: list[str] | None = None,
+    grants: UrlGrants | None = None,
+    searcher: internet_agent.Searcher | None = None,
+) -> str:
+    """Look one question up and return the text the caller reads.
+
+    The chat agent asks through the tool above. An assignment session asks
+    through the ``internet`` builtin of the gateway, which calls
+    ``POST /v1/internet`` (``core/joshua_core/internet_api.py``); the two take
+    the same path from here.
 
     A URL is passed on only when a person gave it, or when an earlier answer in
     this conversation returned it as a source. Anything else is refused and the
-    refusal says why, because a URL the agent found somewhere is the shortest
+    refusal says why, because a URL the caller found somewhere is the shortest
     way for a page to send something out of this instance.
 
-    Every answer is text the agent can act on: the answer, a refusal, a line
+    Every answer is text the caller can act on: the answer, a refusal, a line
     saying the internet is off, or a line saying nothing was found. It never
     raises.
 
@@ -106,7 +139,6 @@ async def do_lookup(
     if not config.enabled:
         return _UNAVAILABLE
 
-    conversation_id = getattr(deps.conversation, "id", "") or ""
     allowed, refused = _split_urls(urls or [], conversation_id, grants)
     if refused and not allowed:
         return _refusal(refused)
@@ -114,7 +146,7 @@ async def do_lookup(
     logger.info(
         {
             "message": "internet asked",
-            "person_id": deps.person_id,
+            "person_id": person_id,
             "urls": len(allowed),
             "refused": len(refused),
         }
@@ -130,12 +162,12 @@ async def do_lookup(
         searcher=searcher,
     )
     await record_usage(
-        deps.repo,
+        repo,
         "internet",
         used,
         model=resolved.model,
         endpoint=resolved.endpoint,
-        person_id=deps.person_id,
+        person_id=person_id,
         conversation_id=conversation_id or None,
     )
     if answer is None:

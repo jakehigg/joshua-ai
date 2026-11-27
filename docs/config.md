@@ -522,6 +522,14 @@ refused. See [docs/security.md](security.md). What comes back reaches the agent
 wrapped and named as content from the open web, and the agent reads it for the
 person.
 
+**A session of an assignment asks through the gateway.** The `internet`
+builtin of the gateway sends the question to core
+(`POST /v1/internet`), which runs the same lookup under the same rules and
+sends the text of the answer back. The entry turns the server on for the
+people its `allow` names; see
+[mcp-servers.md](mcp-servers.md#the-builtin-servers). With `enabled: false`
+every answer there says that the internet is off.
+
 **A fetch runs here.** That is the whole reason the block list exists. See
 [docs/security.md](security.md).
 

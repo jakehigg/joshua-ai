@@ -14,6 +14,14 @@ with the images and the packaged chart, are at
   through the new table `assignments.git_grant`, which holds a digest and
   never the secret. `docs/assignments.md` and `docs/security.md` have the
   shape.
+- **An assignment session can read the open web.** `internet` is a builtin of
+  the gateway with one tool, `use_internet`: one question, and an answer with
+  its sources. The gateway sends the question to core, which runs the internet
+  agent in a context of its own, so the session gets text and never a page
+  with an egress beside it. Turn it on with an `internet` entry of
+  `kind: builtin` in the `mcp:` section of `joshua.yaml`, and keep the name in
+  the `tools` of a spec that needs research. See
+  [mcp-servers.md](mcp-servers.md#the-builtin-servers).
 
 ## 0.4.3 - 2026-11-27
 

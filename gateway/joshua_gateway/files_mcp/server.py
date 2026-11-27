@@ -125,8 +125,8 @@ def data_root() -> Path:
 def build_builtin_server(name: str, options: dict[str, Any]) -> Server:
     """Build the in-process ``Server`` for a builtin catalog entry.
 
-    ``files``, ``documents`` and ``code-execution`` exist; ``viewer`` and ``research``
-    are reserved names.
+    ``files``, ``documents``, ``code-execution`` and ``internet`` exist;
+    ``viewer`` and ``research`` are reserved names.
     """
     if name == "files":
         from joshua_shared import config
@@ -142,6 +142,14 @@ def build_builtin_server(name: str, options: dict[str, Any]) -> Server:
         from joshua_gateway.code_execution_mcp.server import build_code_execution_server
 
         return build_code_execution_server(data_root(), config.load().code_execution)
+    if name == "internet":
+        from joshua_shared import config
+
+        from joshua_gateway.internet_mcp.server import TIMEOUT_GRACE_S, build_from_env
+
+        # The lookup runs in core, so the request waits as long as one question
+        # of the internet agent may take.
+        return build_from_env(config.load().internet.timeout_seconds + TIMEOUT_GRACE_S)
     raise ValueError(f"unknown builtin server: {name}")
 
 

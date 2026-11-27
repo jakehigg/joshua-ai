@@ -47,6 +47,7 @@ from joshua_core.engine.url_grants import UrlGrants
 from joshua_core.engine.workspace import WorkspaceBlock
 from joshua_core.events import EventService, SkillRegistry, build_channels_resolver
 from joshua_core.history_api import build_history_router
+from joshua_core.internet_api import build_internet_router
 from joshua_core.limits import LimitsTracker
 from joshua_core.limits_api import build_limits_router
 from joshua_core.memory import embed
@@ -114,6 +115,9 @@ class AppContext:
     oneshot: Any = None
     # The subscription limits, or None when `limits.enabled` is false.
     limits: LimitsTracker | None = None
+    # The searcher of the internet agent, or None when the internet is off or
+    # `internet.search` is not set. `POST /v1/internet` runs a lookup with it.
+    internet_searcher: Any = None
 
 
 def _database_url() -> str:
@@ -190,6 +194,7 @@ async def lifespan(app: FastAPI):
     manager = _build_manager(settings, repo, agent_backend, limits_tracker, deliverer)
     memory_store = MemoryStore(db.pool)
     indexer, indexer_loop = _build_memory(settings, memory_store, manager, repo)
+    internet_searcher = _build_internet(settings, manager)
     data_dir = os.environ.get(DATA_DIR_ENV, "/data")
     reflector = NightlyReflector(
         repo=repo, indexer=indexer, manager=manager, settings=settings, data_dir=data_dir
@@ -235,6 +240,7 @@ async def lifespan(app: FastAPI):
         snapshots=_build_snapshots(settings, repo, indexer),
         oneshot=StubOneshot() if agent_backend == "stub" else None,
         limits=limits_tracker,
+        internet_searcher=internet_searcher,
     )
     await scheduler.start()
     manager.start_reaper()
@@ -437,17 +443,28 @@ def _build_memory(
         known_people=[p.id for p in settings.people],
     )
     recall.register(manager, store, settings)
-    if settings.internet.enabled:
-        searcher = internet_agent.build_searcher(
-            settings.internet,
-            os.environ.get(GATEWAY_URL_ENV, ""),
-            os.environ.get(CORE_TOKEN_ENV, ""),
-        )
-        internet.register(manager, settings, manager.url_grants, searcher)
     injection.register(manager, store, settings, repo)
     workspace_awareness.register(manager, store, settings, repo)
     taught_skills.register(manager, store, settings, repo, indexer.skills)
     return indexer, IndexerLoop(indexer, intervals)
+
+
+def _build_internet(settings: JoshuaConfig, manager: ConversationManager) -> Any:
+    """Wire the ``internet`` builtin tool of the agent and return its searcher.
+
+    The searcher runs the search of ``internet.search`` through the gateway.
+    ``POST /v1/internet`` uses the same one, so a lookup of a session searches
+    as a lookup of the agent does. None when the internet is off.
+    """
+    if not settings.internet.enabled:
+        return None
+    searcher = internet_agent.build_searcher(
+        settings.internet,
+        os.environ.get(GATEWAY_URL_ENV, ""),
+        os.environ.get(CORE_TOKEN_ENV, ""),
+    )
+    internet.register(manager, settings, manager.url_grants, searcher)
+    return searcher
 
 
 def _bootstrap_layout(settings: JoshuaConfig) -> None:
@@ -544,6 +561,7 @@ def build_app() -> FastAPI:
     app.include_router(build_admin_router())
     app.include_router(build_auth_router())
     app.include_router(build_history_router())
+    app.include_router(build_internet_router())
     app.include_router(build_profile_router())
     app.include_router(build_push_router())
     app.include_router(build_search_router())

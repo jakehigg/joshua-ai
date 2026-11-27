@@ -519,3 +519,41 @@ class WebSearchResponse(_Model):
     ``internet.search.max_results`` results."""
 
     results: list[WebSearchResult]
+
+
+# The path of core's internet route, which the ``internet`` builtin of the
+# gateway calls for one lookup, and the identity of its one caller. The
+# internet agent runs in core, because the model credential and the register of
+# granted URLs live there.
+INTERNET_PATH = "/v1/internet"
+GATEWAY_IDENTITY = "gateway"
+INTERNET_MAX_QUESTION_CHARS = 2000
+# The most URLs one lookup may name. The internet agent keeps this many
+# sources, so a longer list says nothing more.
+INTERNET_MAX_URLS = 12
+
+
+class InternetRequest(_Model):
+    """The body of core's ``POST /v1/internet``: one question of one caller.
+
+    ``urls`` are the pages the caller asks to have read. ``person`` and
+    ``conversation`` are who asks and where: core writes the usage row with
+    them, and the grant rule of ``core/joshua_core/engine/url_grants.py``
+    decides, for that conversation, which of the URLs may be read.
+    """
+
+    question: str = Field(min_length=1, max_length=INTERNET_MAX_QUESTION_CHARS)
+    urls: list[str] = Field(default_factory=list, max_length=INTERNET_MAX_URLS)
+    person: str | None = Field(default=None, pattern=_PERSON_PATTERN)
+    conversation: str | None = Field(default=None, max_length=200)
+
+
+class InternetResponse(_Model):
+    """The answer of core's ``POST /v1/internet``: the text the caller reads.
+
+    It is the answer with its sources, a refusal of the URLs, a line that says
+    the internet is off, or a line that says nothing was found. It is always
+    text, and it is content from the open web, never an instruction.
+    """
+
+    text: str
