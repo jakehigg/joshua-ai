@@ -139,6 +139,23 @@ def test_a_multipart_turn_reaches_channels_as_multipart(client, channels) -> Non
     assert b"%PDF-1.4 data" in body and b'filename="scan.pdf"' in body and b"look" in body
 
 
+def test_a_turn_and_a_hold_carry_a_text_file(client, channels) -> None:
+    """A text export is a file like any other here: the route refuses no type,
+    and the name the person gave reaches channels, which decides from the
+    bytes."""
+    csv = b"title,pages\nMoby-Dick,635\n"
+    turn = client.post(
+        TURNS, data={"text": "what is in this"}, files={"file": ("books.csv", csv, "")}, auth=ALEX
+    )
+    assert turn.status_code == 200
+    assert b'filename="books.csv"' in channels.bodies[0] and csv in channels.bodies[0]
+
+    channels.held = httpx.Response(200, json={"held": []})
+    hold = client.post(HELD, files={"file": ("notes.md", b"# notes\n", "text/markdown")}, auth=ALEX)
+    assert hold.status_code == 200
+    assert b'filename="notes.md"' in channels.bodies[1]
+
+
 def test_a_body_over_the_limit_is_413_and_names_it(client, channels, monkeypatch) -> None:
     monkeypatch.setenv("TURN_MAX_BYTES", "1024")
     response = client.post(TURNS, json={"text": "x" * 4000}, auth=ALEX)

@@ -1136,6 +1136,41 @@ async def test_the_picture_is_still_there_when_it_is_asked_for(gateway, data_roo
     assert res.content[0].type == "image"
 
 
+async def test_reading_a_cut_text_file_says_it_is_the_first_part(gateway, data_root):
+    """A text file over the extract cap: the read says the text is a part, so
+    the agent never answers as if it had the whole file."""
+    path = data_root / "people" / "alex" / "attachments" / "2026" / "09" / "books.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("title,pages\nMoby-Dick,635\n")
+    write_meta(
+        path,
+        AttachmentMeta(
+            mime="text/plain",
+            original_name="books.csv",
+            extracted_text="title,pages\n",
+            text_source="text",
+            text_truncated=True,
+        ),
+    )
+    app = gateway(files_yaml())
+    async with lifespan(app):
+        headers = {"X-Joshua-Person": "alex"}
+        async with gateway_session(app, "/files", "core", headers) as session:
+            res = await session.call_tool(
+                "read_file", {"path": "people/alex/attachments/2026/09/books.txt"}
+            )
+            listed = result_json(
+                await session.call_tool("list_files", {"root": "people", "recursive": True})
+            )
+    text = res.content[0].text
+    assert "the first part of the file only" in text
+    assert "title,pages" in text
+    # The name the person gave the file is on the listing, whatever the
+    # stored file is called.
+    entry = next(e for e in listed if e["path"].endswith("books.txt"))
+    assert entry["original_name"] == "books.csv"
+
+
 async def test_an_attachment_with_no_stored_text_still_returns_the_picture(gateway, data_root):
     path = data_root / "people" / "alex" / "attachments" / "2026" / "09" / "p.png"
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -150,7 +150,9 @@ describe("Composer attachment", () => {
   afterEach(cleanup);
 
   function pick(file: File) {
-    const input = screen.getByLabelText("Attach a photo or a PDF") as HTMLInputElement;
+    const input = screen.getByLabelText(
+      "Attach a photo, a PDF, or a text file",
+    ) as HTMLInputElement;
     // jsdom has no file picker; set the list the input would have.
     Object.defineProperty(input, "files", { value: [file], configurable: true });
     fireEvent.change(input);
@@ -200,16 +202,22 @@ describe("Composer attachment", () => {
 
   it("keeps the paperclip live, so a message that waits for a turn carries a file", () => {
     const { send } = setup();
-    const input = screen.getByLabelText("Attach a photo or a PDF") as HTMLInputElement;
+    const input = screen.getByLabelText(
+      "Attach a photo, a PDF, or a text file",
+    ) as HTMLInputElement;
     expect(input.disabled).toBe(false);
     pick(new File(["pixels"], "photo.png", { type: "image/png" }));
     expect(send.disabled).toBe(false);
   });
 
-  it("only takes images and PDFs", () => {
+  it("takes images, PDFs and text files, by type and by extension", () => {
     setup();
-    const input = screen.getByLabelText("Attach a photo or a PDF") as HTMLInputElement;
-    expect(input.accept).toBe("image/*,application/pdf");
+    const input = screen.getByLabelText(
+      "Attach a photo, a PDF, or a text file",
+    ) as HTMLInputElement;
+    expect(input.accept).toBe(
+      "image/*,application/pdf,text/*,.txt,.csv,.tsv,.md,.markdown,.json",
+    );
   });
 
   it("asks the phone keyboard for a send key, and keeps the file input out of the field order", () => {
@@ -325,7 +333,9 @@ describe("Composer paste", () => {
   it("refuses a pasted file of another type", () => {
     const { box } = setup();
     paste(box, clipboard(new File(["x"], "notes.zip", { type: "application/zip" })));
-    expect(screen.getByRole("alert").textContent).toBe("notes.zip is not a photo or a PDF");
+    expect(screen.getByRole("alert").textContent).toBe(
+      "notes.zip is not a photo, a PDF, or a text file",
+    );
     expect(document.querySelector(".file-chip")).toBeNull();
   });
 
@@ -370,5 +380,95 @@ describe("Composer paste", () => {
     fireEvent.keyDown(box, { key: "Enter" });
     expect(onSend).toHaveBeenCalledWith("hello", null);
     expect(onDraft).toHaveBeenLastCalledWith("");
+  });
+});
+
+// A browser gives a CSV or a Markdown file an empty or an odd MIME type, so
+// the three ways in — the paperclip, a paste and a drop — match on the
+// extension as well as on the type.
+describe("Composer text files", () => {
+  beforeEach(() => keys(true));
+  afterEach(cleanup);
+
+  /** One file on a clipboard or on a drag, as the browser gives it. */
+  function transfer(file: File) {
+    return { items: [{ kind: "file", type: file.type, getAsFile: () => file }], files: [file] };
+  }
+
+  function pick(file: File) {
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    fireEvent.change(input);
+  }
+
+  function paste(file: File) {
+    const box = screen.getByLabelText("Message to Joshua");
+    fireEvent.paste(box, { clipboardData: transfer(file) });
+  }
+
+  function drop(file: File) {
+    const form = document.querySelector("form.composer") as Element;
+    fireEvent.drop(form, { dataTransfer: transfer(file) });
+  }
+
+  const ways: [string, (file: File) => void][] = [
+    ["the paperclip", pick],
+    ["a paste", paste],
+    ["a drop", drop],
+  ];
+
+  for (const [way, attach] of ways) {
+    it(`takes a .csv with no MIME type through ${way}`, () => {
+      const { onSend, send } = setup();
+      const csv = new File(["title,pages\n"], "books.csv", { type: "" });
+      attach(csv);
+      expect(screen.getByText("books.csv")).toBeTruthy();
+      expect(screen.queryByRole("alert")).toBeNull();
+      fireEvent.click(send);
+      expect(onSend).toHaveBeenCalledWith("", csv);
+    });
+
+    it(`takes a .md with no MIME type through ${way}`, () => {
+      const { onSend, send } = setup();
+      const markdown = new File(["# notes\n"], "notes.md", { type: "" });
+      attach(markdown);
+      expect(screen.getByText("notes.md")).toBeTruthy();
+      expect(screen.queryByRole("alert")).toBeNull();
+      fireEvent.click(send);
+      expect(onSend).toHaveBeenCalledWith("", markdown);
+    });
+
+    it(`refuses a .zip and an .exe through ${way}, each with a message`, () => {
+      setup();
+      attach(new File(["PK"], "notes.zip", { type: "application/zip" }));
+      expect(screen.getByRole("alert").textContent).toBe(
+        "notes.zip is not a photo, a PDF, or a text file",
+      );
+      expect(document.querySelector(".file-chip")).toBeNull();
+      attach(new File(["MZ"], "setup.exe", { type: "" }));
+      expect(screen.getByRole("alert").textContent).toBe(
+        "setup.exe is not a photo, a PDF, or a text file",
+      );
+      expect(document.querySelector(".file-chip")).toBeNull();
+    });
+  }
+
+  it("takes a dropped file off the browser, so the tab does not open it", () => {
+    setup();
+    const form = document.querySelector("form.composer") as Element;
+    const csv = new File(["title,pages\n"], "books.csv", { type: "" });
+    const overNotAllowed = fireEvent.dragOver(form, { dataTransfer: transfer(csv) });
+    const dropNotAllowed = fireEvent.drop(form, { dataTransfer: transfer(csv) });
+    expect(overNotAllowed).toBe(false);
+    expect(dropNotAllowed).toBe(false);
+  });
+
+  it("leaves a drag of text to the browser", () => {
+    setup();
+    const form = document.querySelector("form.composer") as Element;
+    const text = { items: [{ kind: "string", type: "text/plain" }], files: [] };
+    expect(fireEvent.dragOver(form, { dataTransfer: text })).toBe(true);
+    expect(fireEvent.drop(form, { dataTransfer: text })).toBe(true);
+    expect(document.querySelector(".file-chip")).toBeNull();
   });
 });

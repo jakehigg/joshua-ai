@@ -22,6 +22,14 @@ with the images and the packaged chart, are at
   `kind: builtin` in the `mcp:` section of `joshua.yaml`, and keep the name in
   the `tools` of a spec that needs research. See
   [mcp-servers.md](mcp-servers.md#the-builtin-servers).
+- **The web chat takes a text file.** The composer attaches a `.txt`, `.csv`,
+  `.tsv`, `.md`, `.markdown`, or `.json` export beside a photo and a PDF,
+  through the paperclip, a paste, or a drop on the composer, and it reads the
+  extension as well as the MIME type, because a browser often gives a CSV an
+  odd one. Channels reads the text of the file as it always has, keeps the
+  name the person gave it, and a file whose text was cut at the extract cap
+  tells the agent that it holds the first part only. See
+  [channels.md](channels.md#attachments).
 
 ## 0.4.3 - 2026-11-27
 

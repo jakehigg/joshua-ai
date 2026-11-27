@@ -189,14 +189,20 @@ def attachment_note(meta: AttachmentMeta | None) -> str:
     """One line about a file for the note on the turn, or an empty string.
 
     The description is the model's own words, so it is plain. The text of the
-    file is not: it is named here and quoted nowhere.
+    file is not: it is named here and quoted nowhere. A text file that was cut
+    at the extract cap says so, with no description, so the agent knows it
+    holds the first part of the file and nothing more.
     """
-    if meta is None or meta.description is None:
+    if meta is None:
         return ""
-    line = f"{meta.description.kind}: {meta.description.subject}"
-    if meta.has_text():
-        line += "; the text of it is in the record of the file"
-    return line
+    parts: list[str] = []
+    if meta.description is not None:
+        parts.append(f"{meta.description.kind}: {meta.description.subject}")
+        if meta.has_text():
+            parts.append("the text of it is in the record of the file")
+    if meta.text_truncated and meta.has_text():
+        parts.append("the text of it is the first part of the file only")
+    return "; ".join(parts)
 
 
 def describe_audit(meta: AttachmentMeta | None) -> dict[str, Any]:

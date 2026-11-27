@@ -11,16 +11,18 @@
 // COUNTER_FROM characters. The length is counted as the backend counts it:
 // code points, after trim.
 //
-// The paperclip takes one photo or one PDF. The chosen file shows as a chip
+// The paperclip takes one photo, one PDF, or one text file (.txt, .csv,
+// .tsv, .md, .markdown, .json). The chosen file shows as a chip
 // above the box, with a button to take it off. A file over MAX_FILE_BYTES
 // is not attached and says so; the backend holds the same limit. With a
 // file attached, a message with no text can be sent.
 //
-// Cmd/Ctrl+V with a file on the clipboard attaches it, as the paperclip does:
-// the same types, the same size cap, the same preview. A screenshot of the
-// operating system arrives as an image/png file with no name of its own, so
-// it gets one, pasted-YYYYMMDD-HHMMSS.png. A paste with no file is a text
-// paste and stays one.
+// Cmd/Ctrl+V with a file on the clipboard attaches it, and so does a file
+// dropped on the composer, as the paperclip does: the same types, the same
+// size cap, the same preview. A screenshot of the operating system arrives as
+// an image/png file with no name of its own, so it gets one,
+// pasted-YYYYMMDD-HHMMSS.png. A paste with no file is a text paste and stays
+// one, and a drag with no file is left to the browser.
 //
 // A message can be written while Joshua is still working on a turn: it is
 // taken and waits for that turn (useTurn.ts), and the box is emptied as
@@ -40,6 +42,7 @@ import {
   useState,
   type ChangeEvent,
   type ClipboardEvent,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
@@ -52,15 +55,24 @@ export const COUNTER_FROM = 7000;
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // The box stops growing at this many lines and scrolls (index.css, max-height).
 export const MAX_ROWS = 5;
-export const FILE_ACCEPT = "image/*,application/pdf";
+// The extensions of a text file. A browser gives a CSV or a Markdown file an
+// empty or an odd MIME type, so the extension decides as well as the type.
+export const TEXT_EXTENSIONS = [".txt", ".csv", ".tsv", ".md", ".markdown", ".json"];
+export const FILE_ACCEPT = `image/*,application/pdf,text/*,${TEXT_EXTENSIONS.join(",")}`;
+// What the composer calls the types it takes, in the hint and in a refusal.
+export const FILE_KINDS = "a photo, a PDF, or a text file";
 
 export function charCount(text: string): number {
   return Array.from(text.trim()).length;
 }
 
-/** True for a type that FILE_ACCEPT takes: a photo or a PDF. */
-function accepted(type: string): boolean {
-  return type.startsWith("image/") || type === "application/pdf";
+/** True for a file that FILE_ACCEPT takes: a photo, a PDF, or a text file. */
+function accepted(type: string, name: string): boolean {
+  if (type.startsWith("image/") || type === "application/pdf" || type.startsWith("text/")) {
+    return true;
+  }
+  const lower = name.toLowerCase();
+  return TEXT_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
 /** The name of a pasted file that has none: pasted-YYYYMMDD-HHMMSS.<ext>. */
@@ -72,8 +84,8 @@ function pastedName(type: string, now = new Date()): string {
   return `pasted-${day}-${time}.${ext}`;
 }
 
-/** The file of a paste: the first entry of the clipboard that is a file. */
-function pastedFile(data: DataTransfer | null): File | null {
+/** The file of a paste or a drop: the first entry of the transfer that is a file. */
+function transferFile(data: DataTransfer | null): File | null {
   if (!data) return null;
   const entry = Array.from(data.items ?? []).find((item) => item.kind === "file");
   return entry?.getAsFile() ?? Array.from(data.files ?? [])[0] ?? null;
@@ -216,12 +228,24 @@ export function Composer({ onSend, draft = null, onDraft }: Props) {
     setFile(name === picked.name ? picked : new File([picked], name, { type: picked.type }));
   };
 
+  // Takes a picked, pasted or dropped file: a file with no name of its own
+  // gets one, and a type the composer does not take is refused with a message.
+  const take = (picked: File) => {
+    const name = picked.name === "" ? pastedName(picked.type) : picked.name;
+    if (!accepted(picked.type, name)) {
+      setFile(null);
+      setFileError(`${name} is not ${FILE_KINDS}`);
+      return;
+    }
+    attach(picked, name);
+  };
+
   const onPick = (e: ChangeEvent<HTMLInputElement>) => {
     const picked = e.target.files?.[0] ?? null;
     // Empty the input, so the same file can be chosen again after Remove.
     e.target.value = "";
     if (!picked) return;
-    attach(picked);
+    take(picked);
   };
 
   // The handler sits on the box and on the form, so a paste with the box
@@ -229,17 +253,29 @@ export function Composer({ onSend, draft = null, onDraft }: Props) {
   // defaultPrevented keeps the file from being taken twice.
   const onPaste = (e: ClipboardEvent<HTMLElement>) => {
     if (e.defaultPrevented) return;
-    const pasted = pastedFile(e.clipboardData);
+    const pasted = transferFile(e.clipboardData);
     // No file: a text paste, which the browser does as usual.
     if (!pasted) return;
     e.preventDefault();
-    const name = pasted.name === "" ? pastedName(pasted.type) : pasted.name;
-    if (!accepted(pasted.type)) {
-      setFile(null);
-      setFileError(`${name} is not a photo or a PDF`);
-      return;
+    take(pasted);
+  };
+
+  // A file dragged onto the composer attaches on the drop. The dragover is
+  // taken as well, because a browser that is not told the drop is wanted
+  // opens the file in the tab instead.
+  const onDragOver = (e: DragEvent<HTMLElement>) => {
+    if (Array.from(e.dataTransfer?.items ?? []).some((item) => item.kind === "file")) {
+      e.preventDefault();
     }
-    attach(pasted, name);
+  };
+
+  const onDrop = (e: DragEvent<HTMLElement>) => {
+    if (e.defaultPrevented) return;
+    const dropped = transferFile(e.dataTransfer);
+    // No file: a drag of text, which the browser drops into the box as usual.
+    if (!dropped) return;
+    e.preventDefault();
+    take(dropped);
   };
 
   const removeFile = () => {
@@ -268,12 +304,18 @@ export function Composer({ onSend, draft = null, onDraft }: Props) {
   };
 
   return (
-    <form className="composer" onSubmit={onSubmit} onPaste={onPaste}>
+    <form
+      className="composer"
+      onSubmit={onSubmit}
+      onPaste={onPaste}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
       {file && <Preview file={file} onRemove={removeFile} />}
       <div className="composer-inner">
-        <label className="attach" title="Attach a photo or a PDF">
+        <label className="attach" title={`Attach ${FILE_KINDS}`}>
           <ClipIcon />
-          <span className="visually-hidden">Attach a photo or a PDF</span>
+          <span className="visually-hidden">Attach {FILE_KINDS}</span>
           <input type="file" accept={FILE_ACCEPT} onChange={onPick} tabIndex={-1} />
         </label>
         <textarea
