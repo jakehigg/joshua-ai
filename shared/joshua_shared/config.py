@@ -115,8 +115,9 @@ NO_VIEWER_ACCESS_WARNING = (
 # once by the import and never again.
 RETIRED_VIEWER_WARNING = (
     "viewer.users, VIEWER_PASSWORDS and VIEWER_PW_* are retired: core holds "
-    "every sign-in secret, and the viewer ignores these. Delete them once the "
-    "one-time import has run."
+    "every sign-in secret, and the viewer ignores these. Keep viewer.users until "
+    "the one-time import has run, because the import reads only the ids that "
+    "viewer.users names. Then delete all three."
 )
 
 # The two environment sources of the retired viewer passwords.

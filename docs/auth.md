@@ -300,6 +300,12 @@ stored for nobody; the log names the person and never the value. A run that
 wrote no row writes no marker either, so the import runs again once the
 values are corrected.
 
+The import reads only the people that `viewer.users` names, as the old
+viewer let only those people sign in. Keep `viewer.users` in `joshua.yaml`
+until the import has run. An id that `VIEWER_PASSWORDS` or `VIEWER_PW_<ID>`
+names and `viewer.users` does not gets no secret, and the log has the line
+`auth import skipped` with `why: not in viewer.users` for it.
+
 Compose gives `VIEWER_PASSWORDS` from `.env` to core. Write the value in
 single quotes:
 
@@ -323,6 +329,8 @@ them again, and `make validate` warns while either one is there.
   Admin → Users, or an operator runs `auth-reset`.
 
 The viewer serves plain HTTP. Terminate TLS at a reverse proxy, and keep the
-address on an internal network that you trust. This is the interface of one
+address on an internal network that you trust. The proxy must send the
+`Host` of the browser, or every sign-in fails:
+[operations.md](operations.md#the-viewer) has the nginx line. This is the interface of one
 instance, for the people of that instance. Do not expose it on the public
 internet.

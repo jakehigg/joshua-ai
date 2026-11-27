@@ -26,11 +26,13 @@ from joshua_core.turns import (
     TURN_FAILED,
     DraftStore,
     HoldStore,
+    RepoMessageClaims,
     TicketStore,
     TurnService,
+    message_key,
 )
 from joshua_shared import config as config_module
-from joshua_shared.contracts import Attachment
+from joshua_shared.contracts import Attachment, TurnEvent
 from joshua_shared.http import FleetClient
 
 CHANNELS_TOKEN = "chan-tok"
@@ -190,6 +192,7 @@ def build_turns(
     tmp_path: Any,
     *,
     manager: Any | None = None,
+    claims: Any | None = None,
 ) -> TurnService:
     if manager is None:
         manager = ConversationManager(
@@ -206,7 +209,9 @@ def build_turns(
         transport=httpx.ASGITransport(app=make_fake_channels(received)),
     )
     deliverer = Deliverer(client)
-    return TurnService(repo=repo, settings=settings, manager=manager, deliverer=deliverer)
+    return TurnService(
+        repo=repo, settings=settings, manager=manager, deliverer=deliverer, claims=claims
+    )
 
 
 def core_client(turns: TurnService) -> httpx.AsyncClient:
@@ -312,6 +317,82 @@ async def test_duplicate_message_id_not_rerun(tmp_path) -> None:
     assert second.status_code == 200
     assert second.json() == {"accepted": False, "reason": "duplicate"}
     assert len(received) == 1
+
+
+class ClaimsRepo:
+    """The ``turn_message_seen`` table in memory, shared by two processes."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.keys: set[str] = set()
+        self.fail = fail
+
+    async def claim_message(self, key: str, ttl_seconds: int) -> bool:
+        if self.fail:
+            raise ConnectionError("the database went away")
+        if key in self.keys:
+            return False
+        self.keys.add(key)
+        return True
+
+
+async def test_a_restart_does_not_rerun_a_message(tmp_path) -> None:
+    """Channels posts the messages of the last minutes again after a restart.
+    The claims are in the database, so a new core, with nothing in memory,
+    drops the message that the old core already ran."""
+    store = ClaimsRepo()
+    received: list[dict[str, Any]] = []
+    before = build_turns(
+        TurnsFakeRepo(), make_settings(), received, tmp_path, claims=RepoMessageClaims(store)
+    )
+    async with core_client(before) as client:
+        first = await client.post("/v1/turns", json=dm_event(), headers=bearer(CHANNELS_TOKEN))
+        await before.drain()
+
+    after = build_turns(
+        TurnsFakeRepo(), make_settings(), received, tmp_path, claims=RepoMessageClaims(store)
+    )
+    async with core_client(after) as client:
+        again = await client.post("/v1/turns", json=dm_event(), headers=bearer(CHANNELS_TOKEN))
+        await after.drain()
+
+    assert first.status_code == 202
+    assert again.json() == {"accepted": False, "reason": "duplicate"}
+    assert len(received) == 1
+
+
+async def test_a_failing_claim_store_still_runs_the_turn(tmp_path) -> None:
+    """A claim that cannot be written never drops a message. The cache in
+    memory still catches a duplicate inside the same process."""
+    received: list[dict[str, Any]] = []
+    turns = build_turns(
+        TurnsFakeRepo(),
+        make_settings(),
+        received,
+        tmp_path,
+        claims=RepoMessageClaims(ClaimsRepo(fail=True)),
+    )
+    async with core_client(turns) as client:
+        first = await client.post("/v1/turns", json=dm_event(), headers=bearer(CHANNELS_TOKEN))
+        await turns.drain()
+        second = await client.post("/v1/turns", json=dm_event(), headers=bearer(CHANNELS_TOKEN))
+        await turns.drain()
+
+    assert first.status_code == 202
+    assert second.json() == {"accepted": False, "reason": "duplicate"}
+    assert len(received) == 1
+
+
+def test_the_message_key_names_the_channel_and_the_chat() -> None:
+    """A Telegram message id is unique only in its chat: the same id in
+    another chat or on another channel is another message."""
+    one = TurnEvent.model_validate(dm_event())
+    other_chat = TurnEvent.model_validate(
+        dm_event(channel="telegram:112233", chat={"kind": "dm", "id": "112233"})
+    )
+    other_channel = TurnEvent.model_validate(dm_event(channel="imessage:998877"))
+    keys = {message_key(one), message_key(other_chat), message_key(other_channel)}
+    assert len(keys) == 3
+    assert message_key(TurnEvent.model_validate(dm_event(message_id=None))) is None
 
 
 async def test_turn_failure_delivers_fallback(tmp_path) -> None:

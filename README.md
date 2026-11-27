@@ -120,7 +120,9 @@ make up-dev      # build, then start
 The two do not interfere. A build is tagged `joshua-ai-<component>:dev`, so it
 never replaces a release on your machine, and `make up` still starts the
 release. Both use the same containers and the same volumes, so your data stays
-when you change from one to the other.
+when you change from one to the other. A second checkout on the same host
+needs a project name of its own: see "Run a second checkout on the same host"
+in [`docs/operations.md`](docs/operations.md).
 
 ## Read your notes in a browser
 

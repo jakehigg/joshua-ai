@@ -366,6 +366,17 @@ CREATE TABLE IF NOT EXISTS auth_import_marker (
     done_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     rows_written INT NOT NULL DEFAULT 0
 );
+
+-- The inbound messages that started a turn, for a short window: a message
+-- that channels posts again after a restart is a duplicate, and it does not
+-- run a second turn. The key names the channel, the chat, and the message id
+-- of the platform. Rows older than the window are deleted at the next claim.
+CREATE TABLE IF NOT EXISTS turn_message_seen (
+    key     TEXT PRIMARY KEY,
+    seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_turn_message_seen_seen_at
+    ON turn_message_seen (seen_at);
 """
 
 

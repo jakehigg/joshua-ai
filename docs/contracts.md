@@ -40,7 +40,7 @@ One message or event, from `channels` to `core`.
 | `text` | string | `""` | |
 | `attachments` | list of Attachment | `[]` | `path`, `mime`, `name`, `original_name` |
 | `reply_to` | string | `null` | the platform message this replies to |
-| `message_id` | string | `null` | idempotency key, kept for 15 minutes |
+| `message_id` | string | `null` | idempotency key, with `channel` and `chat.id`, kept for 15 minutes |
 | `event_type` | string | `null` | names a skill (events only) |
 | `payload` | object | `null` | event data (events only) |
 | `options` | object | `null` | `verbatim: true` records the text with no model call |
@@ -190,7 +190,9 @@ Port 8000 in the container. Compose publishes it on the host as
 
 `POST /v1/turns` answers `202` at once and runs the turn in the background. The
 reply reaches the person through `POST /v1/deliver`. A second turn with the
-same `message_id` inside 15 minutes is a duplicate. Core refuses new turns with
+same `channel`, `chat.id` and `message_id` inside 15 minutes is a duplicate.
+Core keeps these keys in the table `turn_message_seen`, so the rule holds
+across a restart of core. Core refuses new turns with
 `429` when more than `2 × core.pool_max` turns run at once.
 
 ### The search route

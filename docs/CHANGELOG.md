@@ -41,6 +41,64 @@ with the images and the packaged chart, are at
   `assignments.git_grant`, which holds a digest and never the secret.
   `docs/assignments.md` and `docs/security.md` have the shape.
 
+### Fixes
+
+- **A restart no longer answers a message a second time.** After a restart,
+  channels reads the iMessage messages of the last five minutes again, to
+  catch one that arrived while it was down. Core forgot at the same restart
+  which of them it had answered, so Joshua answered the last message again.
+  Core now keeps the id of each message in the new table `turn_message_seen`
+  for 15 minutes, so a restart of core keeps it.
+- **A Telegram message is never taken for a message of another chat.** The
+  key of the duplicate check holds the channel and the chat with the message
+  id, because a Telegram message id is unique only in its chat.
+- **The log holds no iMessage webhook secret.** The access log of channels
+  printed the whole path of the webhook, and the path holds the secret. Every
+  log line now shows `/webhook/imessage/[REDACTED]`. Rotate
+  `IMESSAGE_WEBHOOK_SECRET` if somebody you do not trust can read your logs.
+
+## 0.4.2 - 2026-11-27
+
+A fix release for the first installation of the viewer. The import of the old
+viewer passwords names each id it skips, a refused write of the viewer logs
+why, the warning for an open viewer gives a fix that works, and the docs say
+how to run a second checkout on one host and what a reverse proxy must send.
+
+### Upgrading from 0.4.1
+
+Your `joshua.yaml` and your `.env` from 0.4.1 load as they are. This release
+has no schema change and no config change. Put `JOSHUA_VERSION=0.4.2` in
+`.env`, then run `make pull && make up`. On Kubernetes, install the chart at
+0.4.2.
+
+Behind nginx, check that the `location` of the viewer sends the `Host` of the
+browser (`proxy_set_header Host $host;`). Without it, every write of the
+viewer is refused, the sign-in too. See "The viewer" in
+[operations.md](operations.md#the-viewer).
+
+### Fixes
+
+- **The import of the old viewer passwords names each id it skips.** The
+  import reads only the people that `viewer.users` names, as the old viewer
+  did. An id that only `VIEWER_PASSWORDS` or `VIEWER_PW_<ID>` names now gets
+  the log line `auth import skipped` with `why: not in viewer.users`, where it
+  was skipped with no line before. `make validate`, `.env.example`, and
+  `docs/auth.md` now say to keep `viewer.users` until the import has run.
+- **A refused write of the viewer logs why.** When the `Origin` of a write
+  does not match its `Host`, the viewer logs both values. A reverse proxy that
+  sends its own address as `Host` refuses every write, the sign-in too, and
+  the page says only "That sign-in did not work.". `docs/operations.md` now
+  says that the proxy must send the `Host` of the browser, with the nginx line.
+- **The startup warning for `viewer.anonymous: <person>` gives a fix that
+  works.** With `viewer.auth.method: anonymous`, it now says to set a method
+  that asks for a secret as well, because `viewer.anonymous: false` alone
+  leaves a viewer that nobody can read.
+- **The docs say how to run a second checkout on one host.** Set
+  `COMPOSE_PROJECT_NAME` in its `.env`, or two directories with the same name
+  share one database and one `/data`. The ports and the `:dev` images stay
+  shared. See "Run a second checkout on the same host" in
+  `docs/operations.md`.
+
 ## 0.4.1 - 2026-11-27
 
 Joshua can run Python: the new `code-execution` builtin computes in a

@@ -27,9 +27,15 @@ _BEARER_RE = re.compile(r"Bearer\s+\S+")
 _PREFIX_RE = re.compile("(?:" + "|".join(re.escape(p) for p in CREDENTIAL_PREFIXES) + r")\S+")
 
 
+# The iMessage webhook path holds its secret, and the uvicorn access line of
+# channels prints the path of every request.
+_WEBHOOK_PATH_RE = re.compile(r"(/webhook/imessage/)[^/\s\"'?]+")
+
+
 def redact(text: str) -> str:
-    """Mask bearer tokens and known credential shapes in ``text``."""
+    """Mask bearer tokens, known credential shapes, and webhook path secrets."""
     text = _BEARER_RE.sub(_REDACTION, text)
+    text = _WEBHOOK_PATH_RE.sub(r"\g<1>" + _REDACTION, text)
     return _PREFIX_RE.sub(_REDACTION, text)
 
 

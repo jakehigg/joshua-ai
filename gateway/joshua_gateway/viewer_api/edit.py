@@ -99,11 +99,27 @@ def _csrf_valid(person_id: str, path: str, token: str) -> bool:
 
 
 def _origin_ok(request: Request) -> bool:
-    """True when the request has no ``Origin`` header or it matches the host."""
+    """True when the request has no ``Origin`` header or it matches the host.
+
+    A refusal logs the two values. A reverse proxy that sends its own upstream
+    address as ``Host`` makes every write fail this check, and the sign-in
+    then shows only "That sign-in did not work.", so the line is what tells
+    the operator why.
+    """
     origin = request.headers.get("origin")
     if not origin:
         return True
-    return urlparse(origin).netloc == request.headers.get("host", "")
+    host = request.headers.get("host", "")
+    if urlparse(origin).netloc == host:
+        return True
+    logger.info(
+        {
+            "message": "viewer write refused: the Origin does not match the Host",
+            "origin": origin[:200],
+            "host": host[:200],
+        }
+    )
+    return False
 
 
 def _edit_target(person: Person, rel: str, *, create: bool) -> tuple[Root, Path, date | None] | int:

@@ -307,7 +307,8 @@ another, and the answer tells nobody who else is on the roster.
 
 The viewer serves plain HTTP. Terminate TLS at a reverse proxy, and keep the
 address on a network you trust: this is the interface of one instance for the
-people of that instance, not a service to publish.
+people of that instance, not a service to publish. The `Origin` check compares
+with `Host`, so the proxy must send the `Host` of the browser.
 
 ### The headers of the viewer
 
