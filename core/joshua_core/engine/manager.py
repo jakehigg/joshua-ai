@@ -899,7 +899,9 @@ class ConversationManager:
         """The note that tells the agent which files came with the turn.
 
         A file that was described carries that description and, when the file
-        holds words, a note that they are already read. The words themselves are
+        holds words, a note that they are already read. A file whose text was
+        cut at the extract cap says so, so the agent knows it holds the first
+        part of the file only. The words themselves are
         not here: they are untrusted, and ``read_file`` returns them wrapped.
         """
         if not attachments:

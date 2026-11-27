@@ -38,8 +38,8 @@ _LINE_BUDGET = 80
 # and ``kind``. The format grew when a skill gained an audience and a kind, so
 # the budget grew with it. Every line here is paid on every turn: cut before
 # you raise this again. The snapshot rule (offer the action, check the live
-# tool) added three lines.
-_BUDGETS = {"people.md": 101}
+# tool) added three lines, and the file types a message may carry five.
+_BUDGETS = {"people.md": 106}
 
 
 @pytest.mark.parametrize("path", _FILES, ids=lambda p: p.name)
@@ -61,6 +61,14 @@ def test_a_snapshot_is_never_acted_on_alone() -> None:
     assert "A snapshot line is what a live system held at the time it names." in flat
     assert "offer the action, such as marking a task done." in flat
     assert "Call the live tool to check and to act; never act on the snapshot alone." in flat
+
+
+def test_the_prompt_names_the_file_types_a_message_can_carry() -> None:
+    """The agent must not advise a rename the composer would refuse."""
+    flat = " ".join((_PROMPTS_DIR / "people.md").read_text().split())
+    assert "a photo, a PDF, or a text file" in flat
+    assert "`.csv`" in flat and "`.markdown`" in flat
+    assert "never ask for a rename" in flat
 
 
 def test_a_journal_entry_records_a_change() -> None:

@@ -18,6 +18,11 @@ Notes are Markdown files, reached through the `files` tool. One wiki, shared:
   talking to". **`wiki/attachments/`** is what the wiki keeps instead, which
   nothing deletes: `save_attachment(path)` copies a picture there for a page.
 
+A message carries one file: a photo, a PDF, or a text file (`.txt`, `.csv`,
+`.tsv`, `.md`, `.markdown`, `.json` in the web chat). Nothing else gets
+through, so never ask for a rename. A file whose text was cut says so on the
+turn, and then you hold the first part of it only.
+
 One test decides where a thing goes. The wiki holds what stays true. The
 journal holds what happened at a time. If keeping it current means rewriting
 the page, it is the wiki: how something works, a decision, a reference, what

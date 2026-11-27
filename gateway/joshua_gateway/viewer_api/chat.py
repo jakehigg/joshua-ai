@@ -3,9 +3,10 @@
 ``POST /api/v1/chat/<person>/turns`` runs one turn on the channels container
 and streams the answer back as server-sent events. The body is JSON
 (``{"text", "spoken"}``), or ``multipart/form-data`` when the person attaches
-one photo or one PDF: the fields ``text`` and ``file``. The file goes to a
-temporary file as it arrives and is streamed on to channels, so the whole
-body is never in memory. ``TURN_MAX_BYTES`` caps the text and the file
+one file, a photo, a PDF, or a text file: the fields ``text`` and ``file``.
+Channels decides the type from the bytes, so this route carries any file it
+is given. The file goes to a temporary file as it arrives and is streamed on
+to channels, so the whole body is never in memory. ``TURN_MAX_BYTES`` caps the text and the file
 together, and the 413 answer names the limit. The write checks the ``Origin``
 header, as every write route does.
 
@@ -109,7 +110,7 @@ MAX_TEXT_CHARS = 8000
 LOST = "the connection to Joshua was lost"
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 KEEPALIVE = b": keepalive\n\n"
-# The multipart field that carries the photo or the PDF.
+# The multipart field that carries the file: a photo, a PDF, or a text file.
 FILE_FIELD = "file"
 DEFAULT_FILE_TYPE = "application/octet-stream"
 BAD_BODY = "the body must be JSON or multipart/form-data"
@@ -665,7 +666,7 @@ async def held(request: Request, person: Person) -> JSONResponse:
 
 async def hold(request: Request, person: Person) -> JSONResponse:
     """Hold one message, written while a turn of this thread still runs. The
-    message can carry one photo or one PDF, as a turn can."""
+    message can carry one file, a photo, a PDF, or a text file, as a turn can."""
     if not _origin_ok(request):
         return _json({"error": CROSS_SITE, "reason": "cross_site"}, 403)
     limit = viewer_channels.ChatSettings.from_env(os.environ).turn_max_bytes

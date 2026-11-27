@@ -27,7 +27,7 @@ from joshua_channels.deliver import ChannelsContext
 from joshua_channels.guard import Guard
 from joshua_channels.registry import AdapterRegistry
 from joshua_shared import config as config_module
-from joshua_shared.attachments import NO_CAPTION_TEXT
+from joshua_shared.attachments import NO_CAPTION_TEXT, read_meta
 from joshua_shared.contracts import Chat, Handle, TurnEvent
 from joshua_shared.http import FleetClient
 from pdf_fixtures import pdf_with_text
@@ -233,6 +233,33 @@ async def test_a_multipart_turn_carries_every_stored_file(tmp_path: Path) -> Non
         assert (tmp_path / attachment.path).exists()
     # The pipeline deletes the inbox directory it ingested.
     assert list((tmp_path / "inbox").iterdir()) == []
+
+
+async def test_a_multipart_turn_with_a_csv_lands_with_its_text_and_its_name(
+    tmp_path: Path,
+) -> None:
+    """A text export from the web chat: the pipeline reads it as text, keeps
+    the rows in the metadata file, and keeps the name the person gave it."""
+    app, core = _make(tmp_path, pipeline=_pipeline(tmp_path))
+    response = await _post_parts(
+        app,
+        [("file", ("books.csv", b"title,pages\nMoby-Dick,635\n", "text/csv"))],
+        person="alex",
+        text="how many pages",
+    )
+    assert response.status_code == 200
+    attachment = core.events[0].attachments[0]
+    assert attachment.mime == "text/plain"
+    assert attachment.original_name == "books.csv"
+    assert attachment.path.startswith(_month_prefix("alex"))
+    meta = read_meta(tmp_path / attachment.path)
+    assert meta is not None
+    assert meta.text_source == "text"
+    assert "Moby-Dick,635" in (meta.extracted_text or "")
+    # The stored name carries the stem of the sender's name, and the metadata
+    # file keeps the name whole, so the agent and the viewer can say "books.csv".
+    assert "books" in attachment.name
+    assert meta.original_name == "books.csv"
 
 
 async def test_a_file_with_no_caption_gets_the_placeholder(tmp_path: Path) -> None:

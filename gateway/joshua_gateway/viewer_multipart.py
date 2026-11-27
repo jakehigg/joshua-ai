@@ -1,10 +1,10 @@
 """A streaming reader of ``multipart/form-data``.
 
-A turn can carry one photo or one PDF beside the text. Each part is written
-to a temporary file as it arrives, and the file part is streamed on to
-channels from there, so no request holds the whole body in memory. The
-standard library ``email`` parser needs the whole body at once, so the
-frames are parsed here instead.
+A turn can carry one file, a photo, a PDF, or a text file, beside the text.
+Each part is written to a temporary file as it arrives, and the file part is
+streamed on to channels from there, so no request holds the whole body in
+memory. The standard library ``email`` parser needs the whole body at once,
+so the frames are parsed here instead.
 """
 
 from __future__ import annotations

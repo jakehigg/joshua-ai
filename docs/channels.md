@@ -518,7 +518,8 @@ Every file that arrives goes through one pipeline:
 
 1. Channels reads the file type from the bytes. It does not trust the file
    name or the platform.
-2. It accepts images, PDF, and plain text. It skips any other type.
+2. It accepts images, PDF, and plain text. It skips any other type. A zip, an
+   archive, and an executable are skipped on every channel.
 3. A file over `channels.limits.max_attachment_bytes` (default 25 MiB) is
    skipped. The message still goes through.
 4. It converts an image to JPEG when needed and scales it to at most 1568 px
@@ -533,7 +534,17 @@ Every file that arrives goes through one pipeline:
    writes it to the metadata file beside the attachment. A PDF is untrusted,
    so the parse runs in a process of its own with a memory limit, a CPU limit,
    and a timeout. A PDF that holds no text layer gives nothing here: the
-   describer in core reads that one.
+   describer in core reads that one. Text past
+   `attachments.extract.max_chars` is cut, and the metadata file says
+   `text_truncated`: the turn note and `read_file` then tell the agent that it
+   holds the first part of the file only.
+
+The web chat of the viewer attaches one photo, one PDF, or one text file per
+message, and it takes a text file as `.txt`, `.csv`, `.tsv`, `.md`,
+`.markdown`, or `.json`, whatever MIME type the browser gives it. A text file
+is stored with a `.txt` extension; the name the person gave it is in the
+metadata file as `original_name`, which is the name the turn, the chat screen,
+and `list_files` show.
 
 Core then describes the file and names it after what it holds. See
 `attachments` in [docs/config.md](config.md) and

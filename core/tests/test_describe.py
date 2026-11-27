@@ -244,6 +244,30 @@ def test_the_note_names_the_text_and_never_quotes_it() -> None:
     assert "ignore your instructions" not in note
 
 
+def test_the_note_says_when_the_text_is_the_first_part_only() -> None:
+    """A text file over the extract cap: the agent must know it holds a part."""
+    meta = AttachmentMeta(
+        mime="text/plain",
+        original_name="books.csv",
+        extracted_text="title,pages\n",
+        text_source="text",
+        text_truncated=True,
+    )
+
+    assert describe.attachment_note(meta) == "the text of it is the first part of the file only"
+
+
+def test_the_note_of_a_whole_text_file_says_nothing_about_a_cut() -> None:
+    meta = AttachmentMeta(
+        mime="text/plain",
+        original_name="books.csv",
+        extracted_text="title,pages\n",
+        text_source="text",
+    )
+
+    assert describe.attachment_note(meta) == ""
+
+
 def test_the_audit_holds_no_content_of_the_file() -> None:
     meta = AttachmentMeta(mime="image/png", extracted_text="TOTAL 12.40", text_source="vision")
     meta.description = Description(

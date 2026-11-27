@@ -1198,6 +1198,16 @@ search by meaning, and its usage page reads the tokens of each day (see
 [usage](#usage)). The usage page also reads the subscription limits from
 core's open `GET /v1/limits`, with no token (see [limits](#limits)).
 
+**The chat.** The composer attaches one file per message: a photo, a PDF, or
+a text file — `.txt`, `.csv`, `.tsv`, `.md`, `.markdown`, or `.json`. The
+paperclip, a paste, and a file dropped on the composer all take the same
+types, with the same size limit, and a file of another type is refused in the
+page with a message. A browser often gives a CSV or a Markdown file an empty
+or an odd MIME type, so the composer reads the extension as well as the type.
+Channels decides the real type from the bytes
+([channels.md](channels.md#attachments)) and keeps the person's filename, so
+the chat screen and the agent both name `books.csv` by that name.
+
 The viewer is off by default. `make up` starts it when `viewer.enabled` is
 `true`; it listens on `127.0.0.1:8082`, beside the rest of the stack. Put a
 reverse proxy in front for TLS, and keep the address on a network you trust.
@@ -1308,7 +1318,7 @@ A long conversation makes every model call read its whole history. The cap ends 
 A message that arrives while a turn of its conversation runs joins the next
 turn. In the web chat it waits in the hold of the thread; on every other
 channel core folds it into the next turn itself. A waiting message keeps its
-photo or its PDF, and the next turn carries the file.
+file, and the next turn carries it.
 
 | Key | Default | Meaning |
 |---|---|---|

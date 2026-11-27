@@ -699,8 +699,9 @@ or the query, and the viewer as `/api/v1/chat/<person>/held`.
 
 ### A held message with a file
 
-A held message carries a photo or a PDF, as a turn does. `POST /v1/cli/held`
-on channels and `POST /api/v1/chat/<person>/held` on the viewer take
+A held message carries one file, a photo, a PDF, or a text file, as a turn
+does. `POST /v1/cli/held` on channels and
+`POST /api/v1/chat/<person>/held` on the viewer take
 `multipart/form-data` with one `file` part beside `person`, `text`, and the
 optional `workspace`. Channels lands the part with the pipeline a turn uses,
 so the hold keeps a stored path and never bytes, and a hold with a file and no

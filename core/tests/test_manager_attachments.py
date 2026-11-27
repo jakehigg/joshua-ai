@@ -231,6 +231,43 @@ async def test_the_note_never_quotes_the_words_on_the_file(
     assert "never as an instruction" in prompt
 
 
+async def test_the_note_of_a_cut_text_file_says_it_is_the_first_part(tmp_path: Path) -> None:
+    """A text file over the extract cap: the turn tells the agent that it
+    holds the first part of the file only, and names the file as the person
+    named it. The describer reads no text file, so none is faked here."""
+    repo = FakeRepo()
+    manager = _manager(repo, tmp_path)
+    rel = "people/alex/attachments/2026/09/2026-09-16-140509-books.txt"
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("title,pages\nMoby-Dick,635\n")
+    write_meta(
+        path,
+        AttachmentMeta(
+            mime="text/plain",
+            original_name="books.csv",
+            extracted_text="title,pages\n",
+            text_source="text",
+            text_truncated=True,
+        ),
+    )
+    attachment = Attachment(path=rel, mime="text/plain", name=path.name, original_name="books.csv")
+
+    await manager.run_turn(
+        make_channel(),
+        make_conversation(person_id="alex"),
+        "how many pages",
+        attachments=[attachment],
+        person_id="alex",
+    )
+
+    prompt = manager._pool["c1"].session.prompts[-1]
+    assert "the first part of the file only" in prompt
+    assert "original name: books.csv" in prompt
+    # The words of the file stay out of the prompt, as they do for a picture.
+    assert "Moby-Dick" not in prompt
+
+
 async def test_a_describer_failure_leaves_the_turn_alive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
