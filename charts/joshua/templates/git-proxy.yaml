@@ -1,0 +1,184 @@
+{{- if and .Values.assignments.enabled .Values.gitProxy.enabled }}
+{{/* The git proxy: a read-only git server for the sessions, in a pod of its
+     own (assignments/joshua_assignments/git_proxy.py). It is the one pod of
+     the deployment that reaches the git hosts, and it is the same image as the
+     assignments container with another entry point.
+
+     It runs beside the assignments pod and never in it: a network policy
+     selects a pod, so a rule that lets the proxy reach a git host would let a
+     shell in a session reach it too. With the proxy in its own pod, the
+     assignments pod keeps no route to the git hosts at all.
+
+     The proxy holds the read token of each git host and the database. It holds
+     no fleet token, no model credential, and no volume of the instance: it
+     reads the grant of a running session and the row of its assignment from
+     the schema `assignments`, which the manager owns. */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: joshua-git-proxy
+  labels:
+    app.kubernetes.io/name: joshua-git-proxy
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.gitProxy.replicaCount }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: joshua-git-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: joshua-git-proxy
+        {{- include "joshua.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values.config | sha256sum }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      containers:
+        - name: git-proxy
+          {{/* The assignments image, with the proxy as its entry point. */}}
+          image: {{ .Values.gitProxy.image | default (include "joshua.image" (dict "root" $ "name" "assignments")) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "joshua_assignments.git_proxy"]
+          ports:
+            - containerPort: 8003
+          securityContext:
+            {{- include "joshua.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: JOSHUA_CONFIG
+              value: /etc/joshua/joshua.yaml
+            {{- include "joshua.secretEnv" (dict "secret" .Values.secrets.gitProxy) | nindent 12 }}
+          resources:
+            {{- toYaml .Values.gitProxy.resources | nindent 12 }}
+          livenessProbe:
+            httpGet: {path: /healthz, port: 8003}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8003}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            {{/* The same config as the manager: the proxy reads
+                 assignments.repos and assignments.platforms. */}}
+            - name: config
+              mountPath: /etc/joshua
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "joshua.configMapName" . }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: joshua-git-proxy
+  labels:
+    app.kubernetes.io/name: joshua-git-proxy
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: joshua-git-proxy
+  ports:
+    - name: http
+      port: 8003
+      targetPort: 8003
+{{- if .Values.gitProxy.networkPolicy.enabled }}
+{{- $np := .Values.gitProxy.networkPolicy }}
+---
+{{/* Only the assignments pod reaches the proxy, and the proxy reaches the
+     cluster DNS, the database, and the address ranges of the git hosts. The
+     secret of a running session, which the manager writes into the .gitconfig
+     of that session, is the only credential that opens the listener.
+
+     Give the address range of each git host in `assignments.repos`. A git host
+     behind an ingress of this cluster needs the pod range of the cluster as
+     well: Kubernetes rewrites the address of a LoadBalancer to the address of
+     the ingress pod before this policy is checked, so a range that holds the
+     LoadBalancer address alone never matches. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: joshua-git-proxy
+  labels:
+    app.kubernetes.io/name: joshua-git-proxy
+    {{- include "joshua.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: joshua-git-proxy
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: joshua-assignments
+        {{- with $np.extraIngress }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 8003
+  egress:
+    {{- if .Values.postgres.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: joshua-postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    {{- end }}
+    {{- if $np.database.cidrs }}
+    - to:
+        {{- range $np.database.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $np.database.port }}
+    {{- end }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $np.dns.namespaceSelector | nindent 14 }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $np.dns.podSelector | nindent 14 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if $np.gitHosts.cidrs }}
+    {{/* The one route to a host outside the cluster, and it is a fetch. */}}
+    - to:
+        {{- range $np.gitHosts.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        {{- range $np.gitHosts.ports }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}

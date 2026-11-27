@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from joshua_assignments import __main__ as entry
+from joshua_assignments import git_proxy
 from joshua_shared import config
 
 ON = """
@@ -121,3 +122,52 @@ def test_enabled_serves_on_port_8000_with_the_sdk_runner(config_file, monkeypatc
     assert isinstance(manager.runner, SdkRunner)
     assert manager.core is not None
     server._manager = None
+
+
+# The git proxy is another process, with its own entry point.
+
+
+def test_the_proxy_serves_on_its_own_port_and_applies_no_schema(config_file, monkeypatch) -> None:
+    config_file(ON)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    served: list[dict] = []
+    stores: list[dict] = []
+    monkeypatch.setattr(git_proxy.uvicorn, "run", lambda app, **k: served.append(k))
+    real_store = git_proxy.PgStore
+    monkeypatch.setattr(
+        git_proxy,
+        "PgStore",
+        lambda url, **k: stores.append({"url": url, **k}) or real_store(url, **k),
+    )
+    git_proxy.main()
+    # The manager owns the schema, so this process never applies it.
+    assert stores == [{"url": "postgresql://unused", "apply_schema": False}]
+    assert served == [
+        {
+            "host": "0.0.0.0",
+            "port": 8003,
+            "log_config": None,
+            "access_log": False,
+            "server_header": False,
+        }
+    ]
+
+
+def test_the_proxy_without_a_database_url_exits(config_file, monkeypatch, capsys) -> None:
+    config_file(ON)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(SystemExit) as exc:
+        git_proxy.main()
+    assert exc.value.code == 1
+    assert "DATABASE_URL is required" in capsys.readouterr().err
+
+
+def test_the_proxy_exits_when_assignments_is_off(config_file, monkeypatch) -> None:
+    config_file(ON.replace("enabled: true", "enabled: false"))
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    served: list[dict] = []
+    monkeypatch.setattr(git_proxy.uvicorn, "run", lambda app, **k: served.append(k))
+    with pytest.raises(SystemExit) as exc:
+        git_proxy.main()
+    assert exc.value.code == 1
+    assert served == []

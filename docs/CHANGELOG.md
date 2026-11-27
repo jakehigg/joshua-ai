@@ -6,6 +6,41 @@ with the images and the packaged chart, are at
 
 ## Unreleased
 
+### Upgrading
+
+1. The git proxy of the assignments container moves into a container of its
+   own, so an assignment session has no route to a git host any more. Take a
+   database backup first: this release adds the table
+   `assignments.git_grant`, and the container upgrades the schema at start.
+   Nothing is dropped.
+2. On a compose host, take the new `docker-compose.yml` and run `make up`. It
+   gains the `assignments-git-proxy` service, which starts with the
+   `assignments` profile. The proxy reads the git tokens from
+   `.env.assignments`, which it shares with the assignments container, and the
+   `assignments` service no longer reads that file.
+3. With the chart, make the Secret that `secrets.gitProxy` names and put the
+   read token of each git host in it, under the name that its `token_env`
+   gives; add each name to `secrets.gitProxy.keys` and take it out of
+   `secrets.assignments.keys`. Move the address ranges of the git hosts from
+   `assignments.networkPolicy.gitHosts.cidrs` to
+   `gitProxy.networkPolicy.gitHosts.cidrs`, and the range of an external
+   database to `gitProxy.networkPolicy.database.cidrs` as well. A git host
+   behind an ingress of the cluster needs the pod range of the cluster in that
+   list. See the chart [README](../charts/joshua/README.md#the-git-proxy).
+
+### Assignments
+
+- **An assignment session reaches no git host.** The git proxy listened in the
+  manager process, in the container that runs the session, so a network rule
+  that let the proxy fetch let a shell in the session reach the same
+  addresses. The proxy is now a container of its own, `assignments-git-proxy`
+  in compose and the `joshua-git-proxy` pod in the chart: it is the one
+  container with a route to the git hosts, and the session container has none.
+  A clone works as before, and the session still holds no git token. The two
+  processes share the secret of a session through the new table
+  `assignments.git_grant`, which holds a digest and never the secret.
+  `docs/assignments.md` and `docs/security.md` have the shape.
+
 ## 0.4.1 - 2026-11-27
 
 Joshua can run Python: the new `code-execution` builtin computes in a

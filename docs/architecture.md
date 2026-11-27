@@ -110,15 +110,19 @@ A long job needs a checkout, a shell, and file tools. Core must not hold
 them, because core holds every fleet token and the model credential. So the
 work runs in its own container, which holds no model credential and no
 MCP credential. It holds one fleet token of its own, the bearers of its
-callers, the database URL, and the read token of each git host you name. The
-manager of the container puts a git token on each clone through a listener on
-`127.0.0.1`, and refuses a push, so a session never holds a git token. It keeps its rows in the schema `assignments`
+callers, and the database URL. A clone goes to the git proxy, a read-only git
+server in a container of its own, which puts the token of the host on the
+fetch and refuses a push, so a session never holds a git token. The container
+keeps its rows in the schema `assignments`
 of the shared Postgres. It mounts `/data` read-only. A session has no route to
-the open web: its research goes to the `internet` server with `use_internet`.
+the open web and none to a git host: its research goes to the `internet`
+server with `use_internet`, and its clone to the proxy.
 On Kubernetes, a network policy lets only the gateway and the viewer reach it,
-and lets it reach only gateway, channels, core, the database, DNS, and the
-address ranges of the git hosts you name; with compose it is on the `closed`
-network, which has no route off the host.
+and lets it reach only gateway, channels, core, the database, DNS, and the git
+proxy; with compose it is on the `closed`
+network, which has no route off the host. The proxy holds the read token of
+each git host you name, and it is the one container with a route to those
+hosts.
 
 Each assignment runs one Claude Agent SDK session in a scratch directory, in
 slices. Before each slice, the container reads core's `GET /v1/limits`, and

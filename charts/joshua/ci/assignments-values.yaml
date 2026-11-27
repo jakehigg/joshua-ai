@@ -1,5 +1,6 @@
-# Values that render the assignments container, its Service, its network
-# policy, and the viewer that reads it. They name no real deployment.
+# Values that render the assignments container, the git proxy beside it, their
+# Services, their network policies, and the viewer that reads the assignments.
+# They name no real deployment.
 config: |
   name: Test House
   timezone: UTC
@@ -17,6 +18,18 @@ config: |
         token_env: ASSIGNMENTS_GITLAB_TOKEN
 assignments:
   enabled: true
+  networkPolicy:
+    database:
+      cidrs:
+        - 198.51.100.0/24
+# The read token of the git host, under the name that its token_env gives. It
+# is a key of the git proxy, and of no other pod.
+secrets:
+  gitProxy:
+    keys:
+      ASSIGNMENTS_GITLAB_TOKEN: {}
+# The git proxy holds the range of the git host; the session pod holds none.
+gitProxy:
   networkPolicy:
     gitHosts:
       cidrs:
